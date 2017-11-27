@@ -519,7 +519,7 @@ class TableConverter {
                     };
                 }
             default:
-                throw new Error('Found unsupported type!!!');
+                throw new Error('Found unsupported type!!! Create a converter or submit an issue!');
         }
     }
     queryPostgres(queryString) {
