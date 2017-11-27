@@ -1,0 +1,26 @@
+{
+    "extends": [
+      "tslint:recommended"
+    ],
+    "rules": {
+      "quotemark": [true,
+        "single"
+      ],
+      "align": [true,
+        "statements"      
+      ],
+      "max-line-length": [
+        true,255
+      ],
+      "max-classes-per-file":false,
+      "object-literal-sort-keys": false,
+      "radix": false,
+      "space-before-function-paren":false,
+      "array-type": [
+        true,"array"
+      ],
+      "no-unused-variable": [
+        true
+      ]
+    }
+  }
