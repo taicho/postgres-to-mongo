@@ -14,8 +14,6 @@ export declare class TableConverter {
     private gatherDepedencies(...translationOptions);
     private getDepedencyDefinition(translationOptions);
     private getDepedencyGraph(graph);
-    private camelize(str);
-    private toMongoName(name);
     private log(str);
     private hasColumns(options);
     private applyLegacyId(translationOptions, columns);

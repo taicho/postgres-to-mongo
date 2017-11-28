@@ -10,6 +10,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose = require("mongoose");
 const Cursor = require("pg-cursor");
+const Common_1 = require("./Common");
 const Database = require("./Database");
 const defaultOptions = {
     batchSize: 5000,
@@ -89,7 +90,7 @@ class TableConverter {
     prepareOptions(options) {
         options = Object.assign({}, defaultTableTranslationOptions, options);
         options.columns = Object.assign({}, options.columns || {});
-        options.toCollection = options.toCollection || (options.mongifyTableName ? this.toMongoName(options.fromTable) : options.fromTable);
+        options.toCollection = options.toCollection || (options.mongifyTableName ? Common_1.toMongoName(options.fromTable) : options.fromTable);
         return options;
     }
     gatherDepedencies(...translationOptions) {
@@ -172,22 +173,6 @@ class TableConverter {
         Object.keys(graph).forEach(visit);
         return sorted;
     }
-    camelize(str) {
-        return str.replace(/(?:^\w|[A-Z]|\b\w|\s+)/g, (match, index) => {
-            if (+match === 0) {
-                return '';
-            }
-            return index === 0 ? match.toLowerCase() : match.toUpperCase();
-        });
-    }
-    toMongoName(name) {
-        if (name.includes('_')) {
-            return this.camelize(name.replace(/_/g, ' '));
-        }
-        else {
-            return name;
-        }
-    }
     log(str) {
         console.log(str);
     }
@@ -208,7 +193,7 @@ class TableConverter {
     addMissingColumns(translationOptions, columns) {
         translationOptions.columns = Object.assign({}, Object.keys(columns).reduce((obj, curr) => {
             if (!(curr in translationOptions.columns)) {
-                obj[curr] = { to: translationOptions.mongifyColumnNames ? this.toMongoName(curr) : curr };
+                obj[curr] = { to: translationOptions.mongifyColumnNames ? Common_1.toMongoName(curr) : curr };
             }
             else {
                 obj[curr] = translationOptions.columns[curr];
@@ -263,7 +248,7 @@ class TableConverter {
                         const column = translationOptions.columns[translationOptions.embedSourceIdColumn];
                         translationOptions.columns[translationOptions.embedSourceIdColumn] = Object.assign({}, column, {
                             to: translationOptions.mongifyColumnNames ?
-                                this.toMongoName(translationOptions.embedSourceIdColumn) : translationOptions.embedSourceIdColumn,
+                                Common_1.toMongoName(translationOptions.embedSourceIdColumn) : translationOptions.embedSourceIdColumn,
                         });
                     }
                     if (totalCount > 0) {
@@ -410,7 +395,7 @@ class TableConverter {
                                 }
                             }
                             else {
-                                const sourceColumnName = translationOptions.mongifyColumnNames ? this.toMongoName(translationOptions.embedSourceIdColumn) : translationOptions.embedSourceIdColumn;
+                                const sourceColumnName = translationOptions.mongifyColumnNames ? Common_1.toMongoName(translationOptions.embedSourceIdColumn) : translationOptions.embedSourceIdColumn;
                                 const groups = documents.reduce((obj, curr) => {
                                     const group = obj[curr[sourceColumnName].toString()] = obj[curr[sourceColumnName].toString()] || { key: curr[sourceColumnName], docs: [] };
                                     if (!translationOptions.preserveEmbedSourceId) {

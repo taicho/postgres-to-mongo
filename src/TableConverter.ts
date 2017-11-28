@@ -6,6 +6,7 @@ import { start } from 'repl';
 import { IColumnConverter } from 'src/interfaces/IColumnConverter';
 import { IColumnTranslation } from 'src/interfaces/IColumnTranslation';
 import { callbackify } from 'util';
+import { toMongoName } from './Common';
 import * as Database from './Database';
 import { IConverterOptions } from './interfaces/IConverterOptions';
 import { IPostgresColumnInfo } from './interfaces/IPostgresColumnInfo';
@@ -92,7 +93,7 @@ export class TableConverter {
     private prepareOptions(options: ITableTranslation) {
         options = Object.assign({}, defaultTableTranslationOptions, options);
         options.columns = Object.assign({}, options.columns || {});
-        options.toCollection = options.toCollection || (options.mongifyTableName ? this.toMongoName(options.fromTable) : options.fromTable);
+        options.toCollection = options.toCollection || (options.mongifyTableName ? toMongoName(options.fromTable) : options.fromTable);
         return options;
     }
 
@@ -178,23 +179,6 @@ export class TableConverter {
         return sorted;
     }
 
-    private camelize(str) {
-        return str.replace(/(?:^\w|[A-Z]|\b\w|\s+)/g, (match, index) => {
-            if (+match === 0) {
-                return '';
-            }
-            return index === 0 ? match.toLowerCase() : match.toUpperCase();
-        });
-    }
-
-    private toMongoName(name: string) {
-        if (name.includes('_')) {
-            return this.camelize(name.replace(/_/g, ' '));
-        } else {
-            return name;
-        }
-    }
-
     private log(str: string) {
         // tslint:disable-next-line:no-console
         console.log(str);
@@ -219,7 +203,7 @@ export class TableConverter {
     private addMissingColumns(translationOptions: ITableTranslation, columns: { [index: string]: IPostgresColumnInfo }) {
         translationOptions.columns = Object.assign({}, Object.keys(columns).reduce((obj, curr) => {
             if (!(curr in translationOptions.columns)) {
-                obj[curr] = { to: translationOptions.mongifyColumnNames ? this.toMongoName(curr) : curr };
+                obj[curr] = { to: translationOptions.mongifyColumnNames ? toMongoName(curr) : curr };
             } else {
                 obj[curr] = translationOptions.columns[curr];
             }
@@ -272,7 +256,7 @@ export class TableConverter {
                     const column = translationOptions.columns[translationOptions.embedSourceIdColumn];
                     translationOptions.columns[translationOptions.embedSourceIdColumn] = Object.assign({}, column, {
                         to: translationOptions.mongifyColumnNames ?
-                            this.toMongoName(translationOptions.embedSourceIdColumn) : translationOptions.embedSourceIdColumn,
+                            toMongoName(translationOptions.embedSourceIdColumn) : translationOptions.embedSourceIdColumn,
                     });
                 }
                 if (totalCount > 0) {
@@ -417,7 +401,7 @@ export class TableConverter {
                                 throw err;
                             }
                         } else {
-                            const sourceColumnName = translationOptions.mongifyColumnNames ? this.toMongoName(translationOptions.embedSourceIdColumn) : translationOptions.embedSourceIdColumn;
+                            const sourceColumnName = translationOptions.mongifyColumnNames ? toMongoName(translationOptions.embedSourceIdColumn) : translationOptions.embedSourceIdColumn;
                             const groups = documents.reduce((obj, curr) => {
                                 const group = obj[curr[sourceColumnName].toString()] = obj[curr[sourceColumnName].toString()] || { key: curr[sourceColumnName], docs: [] };
                                 if (!translationOptions.preserveEmbedSourceId) {

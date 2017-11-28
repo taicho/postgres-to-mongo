@@ -1,3 +1,4 @@
+import * as Common from './Common';
 import * as Database from './Database';
 import * as Conversion from './TableConverter';
 export * from './interfaces/IColumnConverter';
@@ -9,4 +10,5 @@ export * from './interfaces/ITableTranslation';
 export {
     Database,
     Conversion,
+    Common,
 };
