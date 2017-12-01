@@ -11,7 +11,7 @@ export function getMongoConnection(uri: string) {
         if (mongoose.connection.readyState === 1) {
             return resolve(mongoose.connection);
         }
-        mongoose.connect(uri);
+        mongoose.connect(uri, { useMongoClient: true });
         mongoose.connection.once('open', () => {
             resolve(mongoose.connection);
         });
