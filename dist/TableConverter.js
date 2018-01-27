@@ -8,13 +8,17 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+const debug = require("debug");
+const deepmerge = require("deepmerge");
 const mongoose = require("mongoose");
 const Cursor = require("pg-cursor");
 const Common_1 = require("./Common");
 const Database = require("./Database");
+const log = debug('postgres-to-mongo:TableConverter');
 const defaultOptions = {
     batchSize: 5000,
     postgresSSL: false,
+    schemaDefaultValueConverter: defaultValueConverter,
 };
 const defaultTableTranslationOptions = {
     includeTimestamps: true,
@@ -22,6 +26,41 @@ const defaultTableTranslationOptions = {
     includeId: true,
     legacyIdDestinationName: '_legacyId',
 };
+function defaultValueConverter(schemaType, schemaFormat, valueString) {
+    if (!valueString) {
+        return null;
+    }
+    if (schemaType === 'boolean') {
+        return valueString.toLowerCase() === 'true' ? true : false;
+    }
+    if (valueString.includes('::')) {
+        const extractedValue = valueString.match(/(.*)::/)[1];
+        if (schemaType === 'string') {
+            return extractedValue;
+        }
+        else if (schemaType === 'number') {
+            return parseFloat(extractedValue);
+        }
+    }
+    else if (schemaType === 'number') {
+        return parseFloat(valueString);
+    }
+    else if (schemaType === 'string') {
+        if (schemaFormat === 'date') {
+            return 'Date.now';
+        }
+        else if (valueString === 'uuid_generate_v4()') {
+            return 'mongoose.Types.ObjectId';
+        }
+        else {
+            return valueString;
+        }
+    }
+    else {
+        return valueString;
+    }
+}
+exports.defaultValueConverter = defaultValueConverter;
 function uuidToObjectIdString(sourceValue) {
     return (sourceValue).replace(/-/g, '').substring(0, 24);
 }
@@ -29,6 +68,7 @@ exports.uuidToObjectIdString = uuidToObjectIdString;
 class TableConverter {
     constructor(options) {
         this.options = Object.assign({}, defaultOptions, options);
+        this.generatedSchemas = options.baseCollectionSchema || {};
     }
     convertTables(...options) {
         return __awaiter(this, void 0, void 0, function* () {
@@ -37,6 +77,25 @@ class TableConverter {
             for (const tableOptions of dependencies.results) {
                 try {
                     yield this.convertTableInternal(tableOptions, false);
+                }
+                catch (err) {
+                    this.log(err);
+                    if (this.client) {
+                        this.client.release();
+                        this.client = null;
+                    }
+                }
+            }
+            this.purgeClient();
+        });
+    }
+    generateSchemas(...options) {
+        return __awaiter(this, void 0, void 0, function* () {
+            options = options.map((o) => this.prepareOptions(o));
+            const dependencies = this.gatherDepedencies(...options);
+            for (const tableOptions of dependencies.results) {
+                try {
+                    yield this.generateSchemasInternal(tableOptions, false);
                 }
                 catch (err) {
                     this.log(err);
@@ -85,6 +144,32 @@ class TableConverter {
             this.log('Metadata Fetched.');
             const columns = yield this.getAllColumns(options.fromSchema, options.fromTable);
             yield this.processRecords(options, columns, null);
+        });
+    }
+    generateSchemasInternal(options, prepare) {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (!options.fromSchema) {
+                throw new Error('options.fromSchema must be defined.');
+            }
+            if (!options.fromTable) {
+                throw new Error('options.fromTable must be defined.');
+            }
+            if (prepare) {
+                options = this.prepareOptions(options);
+            }
+            if (!this.client) {
+                this.log('Connecting to databases.');
+                this.client = yield Database.getPostgresConnection(this.options.postgresConnectionString, this.options.postgresSSL);
+                this.mongooseConnection = yield Database.getMongoConnection(this.options.mongoConnectionString);
+                this.log('Connections established.');
+            }
+            else {
+                this.client.release();
+                this.client = yield Database.getPostgresConnection(this.options.postgresConnectionString, this.options.postgresSSL);
+            }
+            this.log('Metadata Fetched.');
+            const columns = yield this.getAllColumns(options.fromSchema, options.fromTable);
+            return this.generateSchema(options, columns);
         });
     }
     prepareOptions(options) {
@@ -174,7 +259,7 @@ class TableConverter {
         return sorted;
     }
     log(str) {
-        console.log(str);
+        log(str);
     }
     hasColumns(options) {
         if (options.columns && Object.keys(options.columns).length) {
@@ -232,25 +317,220 @@ class TableConverter {
             }
         }
     }
+    getSchemaForType(metadata) {
+        const typeName = metadata.data_type;
+        const udtName = metadata.udt_name;
+        switch (typeName) {
+            case 'json':
+                return {
+                    type: 'object',
+                };
+            case 'uuid':
+                return {
+                    type: 'string',
+                    format: 'ObjectId',
+                };
+            case 'text':
+            case 'character varying':
+                return {
+                    type: 'string',
+                };
+            case 'date':
+            case 'time':
+            case 'timestamp with time zone':
+            case 'timestamp without time zone':
+            case 'timestamp':
+                return {
+                    type: 'string',
+                    format: 'date',
+                };
+            case 'boolean':
+                return {
+                    type: 'boolean',
+                };
+            case 'integer':
+            case 'real':
+            case 'numeric':
+            case 'smallint':
+            case 'double precision':
+                return {
+                    type: 'number',
+                };
+            case 'USER-DEFINED':
+                return {
+                    type: 'object',
+                    format: 'geoJSON',
+                    properties: {
+                        type: {
+                            type: 'string',
+                        },
+                        coordinates: {
+                            type: 'array',
+                        },
+                    },
+                };
+            default:
+                throw new Error('Found unsupported type!!! Create a converter or submit an issue!');
+        }
+    }
+    generateSchema(translationOptions, columns) {
+        this.processOptions(translationOptions, columns);
+        this.log(`Generating Schema '${translationOptions.embedIn ? `${translationOptions.embedIn} -> ${translationOptions.toCollection}` : translationOptions.toCollection}'`);
+        const schema = {
+            type: 'object',
+            properties: {},
+        };
+        if (translationOptions.indexes) {
+            schema.indexes = translationOptions.indexes;
+        }
+        const deletedFields = (translationOptions.deleteFields || []).reduce((obj, cur) => {
+            obj.set(cur, null);
+            return obj;
+        }, new Map());
+        for (const columnName of Object.keys(translationOptions.columns)) {
+            const columnOptions = translationOptions.columns[columnName];
+            if (!deletedFields.has(columnOptions.to)) {
+                const columnMetadata = columns[columnName];
+                let schemaType = null;
+                if (columnMetadata) {
+                    if (columnOptions.to === 'id' && columnMetadata.udt_name === 'uuid') {
+                        columnOptions.to = '_id';
+                    }
+                    if (columnOptions.to !== translationOptions.legacyIdDestinationName && columnOptions.to !== translationOptions.embedSourceIdColumn && !columnMetadata.column_default) {
+                        const required = columnMetadata.is_nullable === 'YES' ? false : true;
+                        if (required) {
+                            (schema.required = schema.required || []).push(columnOptions.to);
+                        }
+                    }
+                }
+                if (columnOptions.translator) {
+                    if (!columnOptions.translator.desiredField) {
+                        schemaType = {
+                            type: 'string',
+                            format: 'ObjectId',
+                        };
+                    }
+                    else {
+                        schemaType = {
+                            comment: 'Unable to determine schema',
+                        };
+                    }
+                }
+                else if (!columnOptions.isVirtual) {
+                    schemaType = this.getSchemaForType(columnMetadata);
+                    if (schemaType.format === 'geoJSON') {
+                        schemaType.title = columnOptions.to;
+                        schemaType.index = { type: '2dsphere' };
+                    }
+                    if (columnMetadata && columnMetadata.column_default) {
+                        const defaultValue = this.options.schemaDefaultValueConverter(schemaType.type, schemaType.format, columnMetadata.column_default);
+                        if (defaultValue) {
+                            schemaType.default = defaultValue;
+                        }
+                    }
+                }
+                if (columnOptions.to === 'id' && schemaType.type === 'string' && schemaType.format === 'ObjectId') {
+                    schema.properties._id = schemaType;
+                }
+                else {
+                    schema.properties[columnOptions.to] = schemaType;
+                }
+            }
+        }
+        if (!schema.properties._id && translationOptions.autoLegacyId) {
+            const dynamicColumns = translationOptions.dynamicColumns || {};
+            dynamicColumns._id = {
+                jsonSchema: {
+                    type: 'string',
+                    format: 'ObjectId',
+                },
+            };
+            translationOptions.dynamicColumns = dynamicColumns;
+        }
+        for (const columnName of Object.keys(translationOptions.dynamicColumns || {})) {
+            const dynamicColumnInfo = translationOptions.dynamicColumns[columnName];
+            if (dynamicColumnInfo.jsonSchema) {
+                schema.properties[columnName] = dynamicColumnInfo.jsonSchema;
+                if (dynamicColumnInfo.jsonSchema.type === 'object' || dynamicColumnInfo.jsonSchema.type === 'array') {
+                    schema.properties[columnName].title = columnName;
+                }
+            }
+        }
+        if (!translationOptions.embedIn) {
+            schema.title = translationOptions.toCollection;
+            let currentSchema = this.generatedSchemas[translationOptions.toCollection];
+            if (currentSchema) {
+                function overwriteMerge(destinationArray, sourceArray) {
+                    if (destinationArray.length
+                        && sourceArray.length
+                        && typeof destinationArray[0] === 'string'
+                        && typeof sourceArray[0] === 'string') {
+                        const keys = {};
+                        for (const val of destinationArray) {
+                            keys[val] = null;
+                        }
+                        for (const val of sourceArray) {
+                            keys[val] = null;
+                        }
+                        return Object.keys(keys);
+                    }
+                    else {
+                        return sourceArray;
+                    }
+                }
+                currentSchema = deepmerge(currentSchema, schema, { arrayMerge: overwriteMerge });
+            }
+            else {
+                currentSchema = schema;
+            }
+            this.generatedSchemas[translationOptions.toCollection] = currentSchema;
+        }
+        else {
+            const parentSchema = this.generatedSchemas[translationOptions.toCollection];
+            if (parentSchema) {
+                let newSchema = { type: 'array' };
+                if (translationOptions.embedArrayField) {
+                    newSchema.items = schema.properties[translationOptions.embedArrayField];
+                }
+                else {
+                    delete schema.properties[translationOptions.embedSourceIdColumn];
+                    if (translationOptions.embedSingle) {
+                        newSchema = schema;
+                    }
+                    else {
+                        newSchema.items = schema;
+                    }
+                }
+                newSchema.title = translationOptions.embedIn;
+                parentSchema.properties[translationOptions.embedIn] = newSchema;
+            }
+        }
+    }
+    processOptions(translationOptions, columns) {
+        if (translationOptions.embedSourceIdColumn) {
+            translationOptions.embedSourceIdColumn = translationOptions.mongifyColumnNames ? Common_1.toMongoName(translationOptions.embedSourceIdColumn) : translationOptions.embedSourceIdColumn;
+        }
+        this.applyLegacyId(translationOptions, columns);
+        this.addMissingColumns(translationOptions, columns);
+        const columnToKeys = Object.keys(translationOptions.columns).reduce((obj, curr) => { obj[translationOptions.columns[curr].to] = null; return obj; }, {});
+        if (translationOptions.embedIn && !(translationOptions.embedSourceIdColumn in columnToKeys)) {
+            if (!(translationOptions.embedSourceIdColumn in columns)) {
+                throw new Error(`Embed Source Id Column (${translationOptions.embedSourceIdColumn}) not found in Source Dataset.`);
+            }
+            const column = translationOptions.columns[translationOptions.embedSourceIdColumn];
+            translationOptions.columns[translationOptions.embedSourceIdColumn] = Object.assign({}, column, {
+                to: translationOptions.mongifyColumnNames ?
+                    Common_1.toMongoName(translationOptions.embedSourceIdColumn) : translationOptions.embedSourceIdColumn,
+            });
+        }
+    }
     processRecords(translationOptions, columns, cursor, totalCount = 0, count = 0) {
         return __awaiter(this, void 0, void 0, function* () {
             return new Promise((resolve) => __awaiter(this, void 0, void 0, function* () {
                 if (!cursor) {
                     const countRow = yield this.queryPostgres(`SELECT COUNT(*) FROM "${translationOptions.fromSchema}"."${translationOptions.fromTable}";`);
                     totalCount = typeof countRow[0].count === 'string' ? parseInt(countRow[0].count) : countRow[0].count;
-                    this.applyLegacyId(translationOptions, columns);
-                    this.addMissingColumns(translationOptions, columns);
-                    const columnToKeys = Object.keys(translationOptions.columns).reduce((obj, curr) => { obj[translationOptions.columns[curr].to] = null; return obj; }, {});
-                    if (translationOptions.embedIn && !(translationOptions.embedSourceIdColumn in columnToKeys)) {
-                        if (!(translationOptions.embedSourceIdColumn in columns)) {
-                            throw new Error(`Embed Source Id Column (${translationOptions.embedSourceIdColumn}) not found in Source Dataset.`);
-                        }
-                        const column = translationOptions.columns[translationOptions.embedSourceIdColumn];
-                        translationOptions.columns[translationOptions.embedSourceIdColumn] = Object.assign({}, column, {
-                            to: translationOptions.mongifyColumnNames ?
-                                Common_1.toMongoName(translationOptions.embedSourceIdColumn) : translationOptions.embedSourceIdColumn,
-                        });
-                    }
+                    this.processOptions(translationOptions, columns);
                     if (totalCount > 0) {
                         const selectColumns = Object.keys(columns).reduce((obj, key) => {
                             const curr = columns[key];
@@ -296,7 +576,7 @@ class TableConverter {
                                     yield this.processColumnIndex(translationOptions, columnOptions);
                                 }
                                 if (!columnOptions.isVirtual) {
-                                    const converter = columnOptions.converter || this.getConverter(columnMetadata.data_type, columnMetadata.udt_name);
+                                    const converter = columnOptions.converter || this.getConverter(columnMetadata);
                                     const value = converter(columnValue, columnMetadata.data_type, row, document, columnName, columnOptions.to, columnMetadata.udt_name);
                                     if (!value || (value && !value.documentModified)) {
                                         document[columnOptions.to] = value;
@@ -305,7 +585,7 @@ class TableConverter {
                             }
                             for (const dynamicColumnName of Object.keys(translationOptions.dynamicColumns || {})) {
                                 const dynamicColumn = translationOptions.dynamicColumns[dynamicColumnName];
-                                dynamicColumn(translationOptions, document);
+                                document[dynamicColumnName] = dynamicColumn.value(translationOptions, document);
                             }
                             if (translationOptions.includeId) {
                                 if (!document._id) {
@@ -395,7 +675,7 @@ class TableConverter {
                                 }
                             }
                             else {
-                                const sourceColumnName = translationOptions.mongifyColumnNames ? Common_1.toMongoName(translationOptions.embedSourceIdColumn) : translationOptions.embedSourceIdColumn;
+                                const sourceColumnName = translationOptions.embedSourceIdColumn;
                                 const groups = documents.reduce((obj, curr) => {
                                     const group = obj[curr[sourceColumnName].toString()] = obj[curr[sourceColumnName].toString()] || { key: curr[sourceColumnName], docs: [] };
                                     if (!translationOptions.preserveEmbedSourceId) {
@@ -437,7 +717,9 @@ class TableConverter {
             }));
         });
     }
-    getConverter(typeName, udtName) {
+    getConverter(metadata) {
+        const typeName = metadata.data_type;
+        const udtName = metadata.udt_name;
         switch (typeName) {
             case 'json':
                 return (sourceValue) => {

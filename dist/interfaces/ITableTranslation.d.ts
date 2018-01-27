@@ -11,7 +11,10 @@ export interface ITableTranslation {
         [index: string]: IColumnTranslation;
     };
     dynamicColumns?: {
-        [index: string]: (options: ITableTranslation, document: any) => void;
+        [index: string]: {
+            jsonSchema?: any;
+            value: (options: ITableTranslation, document: any) => any;
+        };
     };
     preserveEmbedSourceId?: boolean;
     mongifyColumnNames?: boolean;

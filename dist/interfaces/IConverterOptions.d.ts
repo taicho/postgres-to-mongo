@@ -3,4 +3,8 @@ export interface IConverterOptions {
     postgresConnectionString: string;
     mongoConnectionString: string;
     postgresSSL?: boolean;
+    baseCollectionSchema?: {
+        [index: string]: any;
+    };
+    schemaDefaultValueConverter?: (schemaType: string, schemaFormat: string, valueString: string) => any;
 }

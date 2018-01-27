@@ -10,7 +10,7 @@
             "request": "launch",
             "name": "Launch Program",
             "sourceMaps": true,
-            "program": "${workspaceFolder}/src/index.ts",
+            "program": "${workspaceFolder}/src/sandbox/index.ts",
             "preLaunchTask": "tsc: build - tsconfig.json",
             "outFiles": [
                 "${workspaceFolder}/dist/**/*.js"

@@ -9,7 +9,7 @@ export interface ITableTranslation {
     embedSourceIdColumn?: string;
     embedTargetIdColumn?: string;
     columns?: { [index: string]: IColumnTranslation };
-    dynamicColumns?: { [index: string]: (options: ITableTranslation, document: any) => void };
+    dynamicColumns?: { [index: string]: { jsonSchema?: any, value: (options: ITableTranslation, document: any) => any } };
     preserveEmbedSourceId?: boolean;
     mongifyColumnNames?: boolean;
     mongifyTableName?: boolean;
