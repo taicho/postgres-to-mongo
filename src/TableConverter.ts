@@ -1,7 +1,9 @@
 import * as debug from 'debug';
 import * as deepmerge from 'deepmerge';
-import { mongo } from 'mongoose';
+import * as fs from 'fs';
 import * as mongoose from 'mongoose';
+import { mongo } from 'mongoose';
+import * as path from 'path';
 import * as pg from 'pg';
 import * as Cursor from 'pg-cursor';
 import { start } from 'repl';
@@ -19,6 +21,7 @@ const defaultOptions: Partial<IConverterOptions> = {
     batchSize: 5000,
     postgresSSL: false,
     schemaDefaultValueConverter: defaultValueConverter,
+    cacheDirectory: './ptmTemp',
 };
 
 const defaultTableTranslationOptions: Partial<ITableTranslation> = {
@@ -349,9 +352,17 @@ export class TableConverter {
                     type: 'boolean',
                 };
             case 'integer':
-            case 'real':
-            case 'numeric':
             case 'smallint':
+            case 'bigint':
+            case 'smallserial':
+            case 'serial':
+            case 'bigserial':
+                return {
+                    type: 'integer',
+                };
+            case 'decimal':
+            case 'numeric':
+            case 'real':
             case 'double precision':
                 return {
                     type: 'number',
@@ -490,6 +501,7 @@ export class TableConverter {
                 } else {
                     delete schema.properties[translationOptions.embedSourceIdColumn];
                     if (translationOptions.embedSingle) {
+                        delete schema.properties._id;
                         newSchema = schema;
                     } else {
                         newSchema.items = schema;
@@ -523,7 +535,7 @@ export class TableConverter {
     private async processRecords(translationOptions: ITableTranslation, columns: { [index: string]: IPostgresColumnInfo }, cursor: any, totalCount: number = 0, count = 0) {
         return new Promise(async (resolve) => {
             if (!cursor) {
-                const countRow = await this.queryPostgres(`SELECT COUNT(*) FROM "${translationOptions.fromSchema}"."${translationOptions.fromTable}";`);
+                const countRow = await this.queryPostgres(`SELECT COUNT(*) FROM "${translationOptions.fromSchema}"."${translationOptions.fromTable}" ${translationOptions.customWhere ? `WHERE ${translationOptions.customWhere}` : ''};`);
                 totalCount = typeof countRow[0].count === 'string' ? parseInt(countRow[0].count) : countRow[0].count;
                 this.processOptions(translationOptions, columns);
                 if (totalCount > 0) {
@@ -536,7 +548,7 @@ export class TableConverter {
                         }
                         return obj;
                     }, []).join(',');
-                    cursor = this.client.query(new Cursor(`SELECT ${selectColumns} FROM "${translationOptions.fromSchema}"."${translationOptions.fromTable}";`)) as any;
+                    cursor = this.client.query(new Cursor(`SELECT ${selectColumns} FROM "${translationOptions.fromSchema}"."${translationOptions.fromTable}" ${translationOptions.customWhere ? `WHERE ${translationOptions.customWhere}` : ''};`)) as any;
                 }
             }
             if (translationOptions.indexes) {
@@ -790,11 +802,44 @@ export class TableConverter {
         });
     }
 
+    private getCacheDirectory() {
+        return path.resolve(this.options.cacheDirectory);
+    }
+
+    private getCacheFilePath(schema: string, tableName: string) {
+        return path.join(this.getCacheDirectory(), `./${schema}.${tableName}.json`);
+    }
+
+    private cacheExists(schema: string, tableName: string) {
+        const cacheDirectory = this.getCacheFilePath(schema, tableName);
+        return fs.existsSync(cacheDirectory);
+    }
+
+    private saveMetadata(schema: string, tableName: string, metadata: { [index: string]: IPostgresColumnInfo }) {
+        const baseDirectory = this.getCacheDirectory();
+        if (!fs.existsSync(baseDirectory)) {
+            fs.mkdirSync(baseDirectory);
+        }
+        const filePath = this.getCacheFilePath(schema, tableName);
+        fs.writeFileSync(filePath, JSON.stringify(metadata, null, 4), 'utf-8');
+    }
+
     private async getAllColumns(schema: string, tableName: string) {
+        if (this.options.useMetadataCache) {
+            if (this.cacheExists(schema, tableName)) {
+                const json = JSON.parse(fs.readFileSync(this.getCacheFilePath(schema, tableName), 'utf-8'));
+                this.log(`Found cached metadata for ${schema}.${tableName}.`);
+                return json as { [index: string]: IPostgresColumnInfo };
+            }
+        }
         const results = await this.queryPostgres(`SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE table_name = '${tableName}' AND table_schema = '${schema}';`);
-        return results.reduce((obj, currentRow: IPostgresColumnInfo) => {
+        const columnResults = results.reduce((obj, currentRow: IPostgresColumnInfo) => {
             obj[currentRow.column_name] = currentRow;
             return obj;
         }, {}) as { [index: string]: IPostgresColumnInfo };
+        if (this.options.createMetadataCache) {
+            this.saveMetadata(schema, tableName, columnResults);
+        }
+        return columnResults;
     }
 }

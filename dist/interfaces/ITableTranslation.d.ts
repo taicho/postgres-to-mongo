@@ -36,4 +36,5 @@ export interface ITableTranslation {
     }[];
     deleteFields?: string[];
     postProcess?: (options: ITableTranslation, documents: any[]) => Promise<void> | void;
+    customWhere?: string;
 }

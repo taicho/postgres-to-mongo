@@ -10,7 +10,9 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 const debug = require("debug");
 const deepmerge = require("deepmerge");
+const fs = require("fs");
 const mongoose = require("mongoose");
+const path = require("path");
 const Cursor = require("pg-cursor");
 const Common_1 = require("./Common");
 const Database = require("./Database");
@@ -19,6 +21,7 @@ const defaultOptions = {
     batchSize: 5000,
     postgresSSL: false,
     schemaDefaultValueConverter: defaultValueConverter,
+    cacheDirectory: './ptmTemp',
 };
 const defaultTableTranslationOptions = {
     includeTimestamps: true,
@@ -349,9 +352,17 @@ class TableConverter {
                     type: 'boolean',
                 };
             case 'integer':
-            case 'real':
-            case 'numeric':
             case 'smallint':
+            case 'bigint':
+            case 'smallserial':
+            case 'serial':
+            case 'bigserial':
+                return {
+                    type: 'integer',
+                };
+            case 'decimal':
+            case 'numeric':
+            case 'real':
             case 'double precision':
                 return {
                     type: 'number',
@@ -495,6 +506,7 @@ class TableConverter {
                 else {
                     delete schema.properties[translationOptions.embedSourceIdColumn];
                     if (translationOptions.embedSingle) {
+                        delete schema.properties._id;
                         newSchema = schema;
                     }
                     else {
@@ -528,7 +540,7 @@ class TableConverter {
         return __awaiter(this, void 0, void 0, function* () {
             return new Promise((resolve) => __awaiter(this, void 0, void 0, function* () {
                 if (!cursor) {
-                    const countRow = yield this.queryPostgres(`SELECT COUNT(*) FROM "${translationOptions.fromSchema}"."${translationOptions.fromTable}";`);
+                    const countRow = yield this.queryPostgres(`SELECT COUNT(*) FROM "${translationOptions.fromSchema}"."${translationOptions.fromTable}" ${translationOptions.customWhere ? `WHERE ${translationOptions.customWhere}` : ''};`);
                     totalCount = typeof countRow[0].count === 'string' ? parseInt(countRow[0].count) : countRow[0].count;
                     this.processOptions(translationOptions, columns);
                     if (totalCount > 0) {
@@ -542,7 +554,7 @@ class TableConverter {
                             }
                             return obj;
                         }, []).join(',');
-                        cursor = this.client.query(new Cursor(`SELECT ${selectColumns} FROM "${translationOptions.fromSchema}"."${translationOptions.fromTable}";`));
+                        cursor = this.client.query(new Cursor(`SELECT ${selectColumns} FROM "${translationOptions.fromSchema}"."${translationOptions.fromTable}" ${translationOptions.customWhere ? `WHERE ${translationOptions.customWhere}` : ''};`));
                     }
                 }
                 if (translationOptions.indexes) {
@@ -798,13 +810,42 @@ class TableConverter {
             });
         });
     }
+    getCacheDirectory() {
+        return path.resolve(this.options.cacheDirectory);
+    }
+    getCacheFilePath(schema, tableName) {
+        return path.join(this.getCacheDirectory(), `./${schema}.${tableName}.json`);
+    }
+    cacheExists(schema, tableName) {
+        const cacheDirectory = this.getCacheFilePath(schema, tableName);
+        return fs.existsSync(cacheDirectory);
+    }
+    saveMetadata(schema, tableName, metadata) {
+        const baseDirectory = this.getCacheDirectory();
+        if (!fs.existsSync(baseDirectory)) {
+            fs.mkdirSync(baseDirectory);
+        }
+        const filePath = this.getCacheFilePath(schema, tableName);
+        fs.writeFileSync(filePath, JSON.stringify(metadata, null, 4), 'utf-8');
+    }
     getAllColumns(schema, tableName) {
         return __awaiter(this, void 0, void 0, function* () {
+            if (this.options.useMetadataCache) {
+                if (this.cacheExists(schema, tableName)) {
+                    const json = JSON.parse(fs.readFileSync(this.getCacheFilePath(schema, tableName), 'utf-8'));
+                    this.log(`Found cached metadata for ${schema}.${tableName}.`);
+                    return json;
+                }
+            }
             const results = yield this.queryPostgres(`SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE table_name = '${tableName}' AND table_schema = '${schema}';`);
-            return results.reduce((obj, currentRow) => {
+            const columnResults = results.reduce((obj, currentRow) => {
                 obj[currentRow.column_name] = currentRow;
                 return obj;
             }, {});
+            if (this.options.createMetadataCache) {
+                this.saveMetadata(schema, tableName, columnResults);
+            }
+            return columnResults;
         });
     }
 }

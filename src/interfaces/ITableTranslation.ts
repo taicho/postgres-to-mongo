@@ -27,4 +27,5 @@ export interface ITableTranslation {
     indexes?: { descriptor: any, options?: any }[];
     deleteFields?: string[];
     postProcess?: (options: ITableTranslation, documents: any[]) => Promise<void> | void;
+    customWhere?: string;
 }

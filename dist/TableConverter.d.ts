@@ -33,5 +33,9 @@ export declare class TableConverter {
     private processRecords(translationOptions, columns, cursor, totalCount?, count?);
     private getConverter(metadata);
     private queryPostgres<T>(queryString);
+    private getCacheDirectory();
+    private getCacheFilePath(schema, tableName);
+    private cacheExists(schema, tableName);
+    private saveMetadata(schema, tableName, metadata);
     private getAllColumns(schema, tableName);
 }
