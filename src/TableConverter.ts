@@ -427,6 +427,7 @@ export class TableConverter {
                             comment: 'Unable to determine schema',
                         };
                     }
+                    schemaType = this.processJsonSchemaOptions(columnOptions, schemaType);
                 } else if (!columnOptions.isVirtual) {
                     schemaType = this.getSchemaForType(columnMetadata);
                     if (schemaType.format === 'geoJSON') {
@@ -439,6 +440,7 @@ export class TableConverter {
                             schemaType.default = defaultValue;
                         }
                     }
+                    schemaType = this.processJsonSchemaOptions(columnOptions, schemaType);
                 }
                 if (columnOptions.to === 'id' && schemaType.type === 'string' && schemaType.format === 'ObjectId') {
                     schema.properties._id = schemaType;
@@ -511,6 +513,18 @@ export class TableConverter {
                 parentSchema.properties[translationOptions.embedIn] = newSchema;
             }
         }
+    }
+
+    private processJsonSchemaOptions(columnOptions: IColumnTranslation, schemaType: any) {
+        if (columnOptions.schemaOptions) {
+            const schemaMode = columnOptions.schemaOptions.mode || 'inclusive';
+            if (schemaMode === 'inclusive') {
+                schemaType = Object.assign({}, schemaType, columnOptions.schemaOptions.jsonSchema);
+            } else {
+                schemaType = columnOptions.schemaOptions.jsonSchema;
+            }
+        }
+        return schemaType;
     }
 
     private processOptions(translationOptions: ITableTranslation, columns: { [index: string]: IPostgresColumnInfo }) {

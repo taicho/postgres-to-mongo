@@ -6,12 +6,18 @@ export interface IDocumentGroups {
     [index: string]: { docs: any[], key: any };
 }
 
+export interface ISchemaOptions {
+    jsonSchema: any;
+    mode?: 'inclusive' | 'exclusive';
+}
+
 export interface IColumnTranslation {
     to?: string;
     converter?: IColumnConverter;
     translator?: ITranslator;
     index?: boolean | any;
     isVirtual?: boolean;
+    schemaOptions?: ISchemaOptions;
 }
 
 export interface ITranslator {

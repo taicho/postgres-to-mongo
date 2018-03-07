@@ -29,6 +29,7 @@ export declare class TableConverter {
     private processDeletes(options, documents);
     private getSchemaForType(metadata);
     private generateSchema(translationOptions, columns);
+    private processJsonSchemaOptions(columnOptions, schemaType);
     private processOptions(translationOptions, columns);
     private processRecords(translationOptions, columns, cursor, totalCount?, count?);
     private getConverter(metadata);
