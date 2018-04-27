@@ -1,13 +1,14 @@
 {
   "name": "postgres-to-mongo",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "A framework for converting Postgres Databases to Mongo.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "test": "./node_modules/gulp/bin/gulp.js test",
-    "build": "./node_modules/gulp/bin/gulp.js build",
-    "watch": "./node_modules/gulp/bin/gulp.js watch"
+    "test": "gulp test",
+    "build": "gulp build",
+    "watch": "gulp watch",
+    "prepublishOnly": "gulp build"
   },
   "repository": {
     "type": "git",

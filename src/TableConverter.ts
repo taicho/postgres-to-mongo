@@ -498,6 +498,15 @@ export class TableConverter {
             const parentSchema = this.generatedSchemas[translationOptions.toCollection];
             if (parentSchema) {
                 let newSchema: any = { type: 'array' };
+                for (const columnName of Object.keys(translationOptions.columns)) {
+                    const columnInfo = translationOptions.columns[columnName];
+                    if (columnInfo.translator && columnInfo.translator.sourceCollection) {
+                        newSchema.relatedObjects = newSchema.relatedObjects || [];
+                        const relatedField = columnInfo.translator.desiredField || '_id';
+                        const relatedCollection = columnInfo.translator.sourceCollection;
+                        newSchema.relatedObjects.push({ relatedField, relatedCollection, localField: columnInfo.to });
+                    }
+                }
                 if (translationOptions.embedArrayField) {
                     newSchema.items = schema.properties[translationOptions.embedArrayField];
                 } else {
@@ -666,7 +675,6 @@ export class TableConverter {
                                 column.translator.processor(translationOptions, uniqueKeys, ids);
                             } else {
                                 for (const idObject of ids) {
-                                    // { _id:foo, maps: [{_legacyId:foo}]}
                                     const lookupObject = { key: idObject[column.translator.sourceIdField], desiredValue: idObject[desiredField] };
                                     const lookupResult = uniqueKeys[lookupObject.key];
                                     for (const doc of lookupResult.docs) {
