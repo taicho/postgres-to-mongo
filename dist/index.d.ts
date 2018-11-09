@@ -1,9 +1,9 @@
 import * as Common from './Common';
 import * as Database from './Database';
 import * as Conversion from './TableConverter';
-export * from './interfaces/IColumnConverter';
-export * from './interfaces/IColumnTranslation';
-export * from './interfaces/IConverterOptions';
-export * from './interfaces/IPostgresColumnInfo';
-export * from './interfaces/ITableTranslation';
+export * from './interfaces/columnConverter';
+export * from './interfaces/columnTranslation';
+export * from './interfaces/converterOptions';
+export * from './interfaces/postgresColumnInfo';
+export * from './interfaces/tableTranslation';
 export { Database, Conversion, Common };

@@ -92,6 +92,30 @@ class TableConverter {
             this.purgeClient();
         });
     }
+    createTranslatorDefinitions(...options) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const translatorDefinitions = [];
+            options = options.map((o) => this.prepareOptions(o));
+            const dependencies = this.gatherDepedencies(...options);
+            for (const tableOptions of dependencies.results) {
+                try {
+                    const definition = yield this.createTranslatorDefinition(tableOptions, false);
+                    if (definition) {
+                        translatorDefinitions.push(definition);
+                    }
+                }
+                catch (err) {
+                    this.log(err);
+                    if (this.client) {
+                        this.client.release();
+                        this.client = null;
+                    }
+                }
+            }
+            this.purgeClient();
+            return translatorDefinitions;
+        });
+    }
     generateSchemas(...options) {
         return __awaiter(this, void 0, void 0, function* () {
             options = options.map((o) => this.prepareOptions(o));
@@ -117,9 +141,45 @@ class TableConverter {
             this.client = null;
         }
     }
-    convertTable(options) {
+    createTranslatorDefinition(options, prepare) {
         return __awaiter(this, void 0, void 0, function* () {
-            this.convertTableInternal(options, true);
+            if (!options.fromSchema) {
+                throw new Error('options.fromSchema must be defined.');
+            }
+            if (!options.fromTable) {
+                throw new Error('options.fromTable must be defined.');
+            }
+            if (prepare) {
+                options = this.prepareOptions(options);
+            }
+            if (!this.client) {
+                this.log('Connecting to databases.');
+                this.client = yield Database.getPostgresConnection(this.options.postgresConnectionString, this.options.postgresSSL);
+                this.mongooseConnection = yield Database.getMongoConnection(this.options.mongoConnectionString);
+                this.log('Connections established.');
+            }
+            else {
+                this.client.release();
+                this.client = yield Database.getPostgresConnection(this.options.postgresConnectionString, this.options.postgresSSL);
+            }
+            this.log(`Processing data for ${options.fromTable} => ${options.toCollection}.`);
+            const columns = yield this.getAllColumns(options.fromSchema, options.fromTable);
+            this.log('Metadata Fetched.');
+            this.processOptions(options, columns);
+            const columnMappings = {};
+            for (const columnKey of Object.keys(options.columns)) {
+                const info = options.columns[columnKey];
+                const postgresName = columnKey;
+                const mongoName = info.to;
+                columnMappings[mongoName] = postgresName;
+            }
+            const translatorDefinition = {
+                collection: options.toCollection,
+                table: options.fromTable,
+                schema: options.fromSchema,
+                columnMappings,
+            };
+            return translatorDefinition;
         });
     }
     convertTableInternal(options, prepare) {

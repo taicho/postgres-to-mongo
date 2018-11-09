@@ -1,4 +1,4 @@
-export interface IConverterOptions {
+export interface ConverterOptions {
     batchSize?: number;
     postgresConnectionString: string;
     mongoConnectionString: string;

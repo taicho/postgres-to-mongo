@@ -7,24 +7,25 @@ import * as path from 'path';
 import * as pg from 'pg';
 import * as Cursor from 'pg-cursor';
 import { start } from 'repl';
-import { IColumnConverter } from 'src/interfaces/IColumnConverter';
-import { IColumnTranslation } from 'src/interfaces/IColumnTranslation';
+import { ColumnConverter } from 'src/interfaces/columnConverter';
+import { ColumnTranslation } from 'src/interfaces/columnTranslation';
 import { callbackify } from 'util';
 import { toMongoName } from './Common';
 import * as Database from './Database';
-import { IConverterOptions } from './interfaces/IConverterOptions';
-import { IPostgresColumnInfo } from './interfaces/IPostgresColumnInfo';
-import { ITableTranslation } from './interfaces/ITableTranslation';
+import { ConverterOptions } from './interfaces/converterOptions';
+import { PostgresColumnInfo } from './interfaces/postgresColumnInfo';
+import { TableTranslation } from './interfaces/tableTranslation';
+import { TranslatorDefinition } from './interfaces/translatorDefinition';
 const log = debug('postgres-to-mongo:TableConverter');
 
-const defaultOptions: Partial<IConverterOptions> = {
+const defaultOptions: Partial<ConverterOptions> = {
     batchSize: 5000,
     postgresSSL: false,
     schemaDefaultValueConverter: defaultValueConverter,
     cacheDirectory: './ptmTemp',
 };
 
-const defaultTableTranslationOptions: Partial<ITableTranslation> = {
+const defaultTableTranslationOptions: Partial<TableTranslation> = {
     includeTimestamps: true,
     includeVersion: true,
     includeId: true,
@@ -68,14 +69,14 @@ export class TableConverter {
     public generatedSchemas: { [index: string]: any };
     private client: pg.Client;
     private mongooseConnection: mongoose.Connection;
-    private options: IConverterOptions;
+    private options: ConverterOptions;
 
-    constructor(options: IConverterOptions) {
+    constructor(options: ConverterOptions) {
         this.options = Object.assign({}, defaultOptions, options);
         this.generatedSchemas = options.baseCollectionSchema || {};
     }
 
-    public async convertTables(...options: ITableTranslation[]) {
+    public async convertTables(...options: TableTranslation[]) {
         options = options.map((o) => this.prepareOptions(o));
         const dependencies = this.gatherDepedencies(...options);
         for (const tableOptions of dependencies.results) {
@@ -92,7 +93,29 @@ export class TableConverter {
         this.purgeClient();
     }
 
-    public async generateSchemas(...options: ITableTranslation[]) {
+    public async createTranslatorDefinitions(...options: TableTranslation[]): Promise<TranslatorDefinition[]> {
+        const translatorDefinitions: TranslatorDefinition[] = [];
+        options = options.map((o) => this.prepareOptions(o));
+        const dependencies = this.gatherDepedencies(...options);
+        for (const tableOptions of dependencies.results) {
+            try {
+                const definition = await this.createTranslatorDefinition(tableOptions, false);
+                if (definition) {
+                    translatorDefinitions.push(definition);
+                }
+            } catch (err) {
+                this.log(err);
+                if (this.client) {
+                    this.client.release();
+                    this.client = null;
+                }
+            }
+        }
+        this.purgeClient();
+        return translatorDefinitions;
+    }
+
+    public async generateSchemas(...options: TableTranslation[]) {
         options = options.map((o) => this.prepareOptions(o));
         const dependencies = this.gatherDepedencies(...options);
         for (const tableOptions of dependencies.results) {
@@ -116,11 +139,46 @@ export class TableConverter {
         }
     }
 
-    private async convertTable(options: ITableTranslation) {
-        this.convertTableInternal(options, true);
+    private async createTranslatorDefinition(options: TableTranslation, prepare: boolean): Promise<TranslatorDefinition> {
+        if (!options.fromSchema) {
+            throw new Error('options.fromSchema must be defined.');
+        }
+        if (!options.fromTable) {
+            throw new Error('options.fromTable must be defined.');
+        }
+        if (prepare) {
+            options = this.prepareOptions(options);
+        }
+        if (!this.client) {
+            this.log('Connecting to databases.');
+            this.client = await Database.getPostgresConnection(this.options.postgresConnectionString, this.options.postgresSSL);
+            this.mongooseConnection = await Database.getMongoConnection(this.options.mongoConnectionString);
+            this.log('Connections established.');
+        } else {
+            this.client.release();
+            this.client = await Database.getPostgresConnection(this.options.postgresConnectionString, this.options.postgresSSL);
+        }
+        this.log(`Processing data for ${options.fromTable} => ${options.toCollection}.`);
+        const columns = await this.getAllColumns(options.fromSchema, options.fromTable);
+        this.log('Metadata Fetched.');
+        this.processOptions(options, columns);
+        const columnMappings: any = {};
+        for (const columnKey of Object.keys(options.columns)) {
+            const info = options.columns[columnKey];
+            const postgresName = columnKey;
+            const mongoName = info.to;
+            columnMappings[mongoName] = postgresName;
+        }
+        const translatorDefinition: TranslatorDefinition = {
+            collection: options.toCollection,
+            table: options.fromTable,
+            schema: options.fromSchema,
+            columnMappings,
+        };
+        return translatorDefinition;
     }
 
-    private async convertTableInternal(options: ITableTranslation, prepare: boolean) {
+    private async convertTableInternal(options: TableTranslation, prepare: boolean) {
         if (!options.fromSchema) {
             throw new Error('options.fromSchema must be defined.');
         }
@@ -145,7 +203,7 @@ export class TableConverter {
         await this.processRecords(options, columns, null);
     }
 
-    private async generateSchemasInternal(options: ITableTranslation, prepare: boolean) {
+    private async generateSchemasInternal(options: TableTranslation, prepare: boolean) {
         if (!options.fromSchema) {
             throw new Error('options.fromSchema must be defined.');
         }
@@ -169,14 +227,14 @@ export class TableConverter {
         return this.generateSchema(options, columns);
     }
 
-    private prepareOptions(options: ITableTranslation) {
+    private prepareOptions(options: TableTranslation) {
         options = Object.assign({}, defaultTableTranslationOptions, options);
         options.columns = Object.assign({}, options.columns || {});
         options.toCollection = options.toCollection || (options.mongifyTableName ? toMongoName(options.fromTable) : options.fromTable);
         return options;
     }
 
-    private gatherDepedencies(...translationOptions: ITableTranslation[]) {
+    private gatherDepedencies(...translationOptions: TableTranslation[]) {
         const graphDefinition: any = {};
         for (const options of translationOptions) {
             if (!options.ignoreDependencies) {
@@ -210,7 +268,7 @@ export class TableConverter {
         return { graph, results };
     }
 
-    private getDepedencyDefinition(translationOptions: ITableTranslation) {
+    private getDepedencyDefinition(translationOptions: TableTranslation) {
         let deps = [];
         if (translationOptions.addedDependencies) {
             deps = deps.concat(translationOptions.addedDependencies);
@@ -263,14 +321,14 @@ export class TableConverter {
         log(str);
     }
 
-    private hasColumns(options: ITableTranslation) {
+    private hasColumns(options: TableTranslation) {
         if (options.columns && Object.keys(options.columns).length) {
             return true;
         }
         return false;
     }
 
-    private applyLegacyId(translationOptions: ITableTranslation, columns: { [index: string]: IPostgresColumnInfo }) {
+    private applyLegacyId(translationOptions: TableTranslation, columns: { [index: string]: PostgresColumnInfo }) {
         if (translationOptions.autoLegacyId && !('id' in translationOptions.columns) && 'id' in columns) {
             translationOptions.columns.id = {
                 to: translationOptions.legacyIdDestinationName,
@@ -279,7 +337,7 @@ export class TableConverter {
         }
     }
 
-    private addMissingColumns(translationOptions: ITableTranslation, columns: { [index: string]: IPostgresColumnInfo }) {
+    private addMissingColumns(translationOptions: TableTranslation, columns: { [index: string]: PostgresColumnInfo }) {
         translationOptions.columns = Object.assign({}, Object.keys(columns).reduce((obj, curr) => {
             if (!(curr in translationOptions.columns)) {
                 obj[curr] = { to: translationOptions.mongifyColumnNames ? toMongoName(curr) : curr };
@@ -290,7 +348,7 @@ export class TableConverter {
         }, {}), translationOptions.columns);
     }
 
-    private async processColumnIndex(translationOptions: ITableTranslation, columnOptions: IColumnTranslation) {
+    private async processColumnIndex(translationOptions: TableTranslation, columnOptions: ColumnTranslation) {
         let indexOptions = null;
         if (typeof columnOptions.index === 'boolean') {
             indexOptions = { background: true };
@@ -310,7 +368,7 @@ export class TableConverter {
         return str.split('.').reduce((o, i) => o[i], obj);
     }
 
-    private processDeletes(options: ITableTranslation, documents: any[]) {
+    private processDeletes(options: TableTranslation, documents: any[]) {
         if (options.deleteFields) {
             for (const doc of documents) {
                 for (const field of options.deleteFields) {
@@ -320,7 +378,7 @@ export class TableConverter {
         }
     }
 
-    private getSchemaForType(metadata: IPostgresColumnInfo): any {
+    private getSchemaForType(metadata: PostgresColumnInfo): any {
         const typeName = metadata.data_type;
         const udtName = metadata.udt_name;
         switch (typeName) {
@@ -386,7 +444,7 @@ export class TableConverter {
         }
     }
 
-    private generateSchema(translationOptions: ITableTranslation, columns: { [index: string]: IPostgresColumnInfo }) {
+    private generateSchema(translationOptions: TableTranslation, columns: { [index: string]: PostgresColumnInfo }) {
         this.processOptions(translationOptions, columns);
         this.log(`Generating Schema '${translationOptions.embedIn ? `${translationOptions.embedIn} -> ${translationOptions.toCollection}` : translationOptions.toCollection}'`);
         const schema: any = {
@@ -524,7 +582,7 @@ export class TableConverter {
         }
     }
 
-    private processJsonSchemaOptions(columnOptions: IColumnTranslation, schemaType: any) {
+    private processJsonSchemaOptions(columnOptions: ColumnTranslation, schemaType: any) {
         if (columnOptions.schemaOptions) {
             const schemaMode = columnOptions.schemaOptions.mode || 'inclusive';
             if (schemaMode === 'inclusive') {
@@ -536,7 +594,7 @@ export class TableConverter {
         return schemaType;
     }
 
-    private processOptions(translationOptions: ITableTranslation, columns: { [index: string]: IPostgresColumnInfo }) {
+    private processOptions(translationOptions: TableTranslation, columns: { [index: string]: PostgresColumnInfo }) {
         if (translationOptions.embedSourceIdColumn) {
             translationOptions.embedSourceIdColumn = translationOptions.mongifyColumnNames ? toMongoName(translationOptions.embedSourceIdColumn) : translationOptions.embedSourceIdColumn;
         }
@@ -555,7 +613,7 @@ export class TableConverter {
         }
     }
 
-    private async processRecords(translationOptions: ITableTranslation, columns: { [index: string]: IPostgresColumnInfo }, cursor: any, totalCount: number = 0, count = 0) {
+    private async processRecords(translationOptions: TableTranslation, columns: { [index: string]: PostgresColumnInfo }, cursor: any, totalCount: number = 0, count = 0) {
         return new Promise(async (resolve) => {
             if (!cursor) {
                 const countRow = await this.queryPostgres(`SELECT COUNT(*) FROM "${translationOptions.fromSchema}"."${translationOptions.fromTable}" ${translationOptions.customWhere ? `WHERE ${translationOptions.customWhere}` : ''};`);
@@ -742,7 +800,7 @@ export class TableConverter {
         });
     }
 
-    private getConverter(metadata: IPostgresColumnInfo): IColumnConverter {
+    private getConverter(metadata: PostgresColumnInfo): ColumnConverter {
         const typeName = metadata.data_type;
         const udtName = metadata.udt_name;
         switch (typeName) {
@@ -837,7 +895,7 @@ export class TableConverter {
         return fs.existsSync(cacheDirectory);
     }
 
-    private saveMetadata(schema: string, tableName: string, metadata: { [index: string]: IPostgresColumnInfo }) {
+    private saveMetadata(schema: string, tableName: string, metadata: { [index: string]: PostgresColumnInfo }) {
         const baseDirectory = this.getCacheDirectory();
         if (!fs.existsSync(baseDirectory)) {
             fs.mkdirSync(baseDirectory);
@@ -851,14 +909,14 @@ export class TableConverter {
             if (this.cacheExists(schema, tableName)) {
                 const json = JSON.parse(fs.readFileSync(this.getCacheFilePath(schema, tableName), 'utf-8'));
                 this.log(`Found cached metadata for ${schema}.${tableName}.`);
-                return json as { [index: string]: IPostgresColumnInfo };
+                return json as { [index: string]: PostgresColumnInfo };
             }
         }
         const results = await this.queryPostgres(`SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE table_name = '${tableName}' AND table_schema = '${schema}';`);
-        const columnResults = results.reduce((obj, currentRow: IPostgresColumnInfo) => {
+        const columnResults = results.reduce((obj, currentRow: PostgresColumnInfo) => {
             obj[currentRow.column_name] = currentRow;
             return obj;
-        }, {}) as { [index: string]: IPostgresColumnInfo };
+        }, {}) as { [index: string]: PostgresColumnInfo };
         if (this.options.createMetadataCache) {
             this.saveMetadata(schema, tableName, columnResults);
         }

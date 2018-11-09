@@ -7,7 +7,7 @@ const pools: any = {
 };
 
 export function getMongoConnection(uri: string) {
-    return new Promise<mongoose.Connection>((resolve) => {
+    return new Promise<any>((resolve) => {
         if (mongoose.connection.readyState === 1) {
             return resolve(mongoose.connection);
         }
@@ -20,7 +20,7 @@ export function getMongoConnection(uri: string) {
 
 export async function getPostgresConnection(uri: string, ssl = false) {
     const pool = pools[uri] = pools[uri] || new pg.Pool({ ssl, connectionString: uri });
-    return new Promise<pg.Client>(async (resolve) => {
+    return new Promise<any>(async (resolve) => {
         const client = await pool.connect();
         resolve(client);
     });

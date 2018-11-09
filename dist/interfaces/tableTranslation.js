@@ -1,3 +1,3 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-//# sourceMappingURL=IColumnTranslation.js.map
+//# sourceMappingURL=tableTranslation.js.map

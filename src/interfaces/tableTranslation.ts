@@ -1,6 +1,6 @@
-import { IColumnTranslation } from './IColumnTranslation';
+import { ColumnTranslation } from './columnTranslation';
 
-export interface ITableTranslation {
+export interface TableTranslation {
     fromSchema: string;
     fromTable: string;
     toCollection?: string;
@@ -8,8 +8,8 @@ export interface ITableTranslation {
     embedSingle?: boolean;
     embedSourceIdColumn?: string;
     embedTargetIdColumn?: string;
-    columns?: { [index: string]: IColumnTranslation };
-    dynamicColumns?: { [index: string]: { jsonSchema?: any, value: (options: ITableTranslation, document: any) => any } };
+    columns?: { [index: string]: ColumnTranslation };
+    dynamicColumns?: { [index: string]: { jsonSchema?: any, value: (options: TableTranslation, document: any) => any } };
     preserveEmbedSourceId?: boolean;
     mongifyColumnNames?: boolean;
     mongifyTableName?: boolean;
@@ -22,10 +22,10 @@ export interface ITableTranslation {
     legacyIdDestinationName?: string;
     filter?: (document: any) => boolean;
     addedDependencies?: string[];
-    onCreated?: (options: ITableTranslation, document: any) => void;
+    onCreated?: (options: TableTranslation, document: any) => void;
     ignoreDependencies?: boolean;
     indexes?: { descriptor: any, options?: any }[];
     deleteFields?: string[];
-    postProcess?: (options: ITableTranslation, documents: any[]) => Promise<void> | void;
+    postProcess?: (options: TableTranslation, documents: any[]) => Promise<void> | void;
     customWhere?: string;
 }

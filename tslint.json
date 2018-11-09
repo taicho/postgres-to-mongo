@@ -1,26 +1,34 @@
 {
-    "extends": [
-      "tslint:recommended"
+  "extends": [
+    "tslint:recommended"
+  ],
+  "rules": {
+    "interface-name": [      
+      true,
+      "never-prefix"
     ],
-    "rules": {
-      "quotemark": [true,
-        "single"
-      ],
-      "align": [true,
-        "statements"      
-      ],
-      "max-line-length": [
-        true,255
-      ],
-      "max-classes-per-file":false,
-      "object-literal-sort-keys": false,
-      "radix": false,
-      "space-before-function-paren":false,
-      "array-type": [
-        true,"array"
-      ],
-      "no-unused-variable": [
-        true
-      ]
-    }
+    "quotemark": [
+      true,
+      "single"
+    ],
+    "align": [
+      true,
+      "statements"
+    ],
+    "max-line-length": [
+      true,
+      255
+    ],
+    "max-classes-per-file": false,
+    "object-literal-sort-keys": false,
+    "radix": false,
+    "space-before-function-paren": false,
+    "array-type": [
+      true,
+      "array"
+    ],
+    "no-unused-variable": [
+      true
+    ]
   }
+}

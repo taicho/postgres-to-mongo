@@ -1,5 +1,6 @@
-import { IConverterOptions } from './interfaces/IConverterOptions';
-import { ITableTranslation } from './interfaces/ITableTranslation';
+import { ConverterOptions } from './interfaces/converterOptions';
+import { TableTranslation } from './interfaces/tableTranslation';
+import { TranslatorDefinition } from './interfaces/translatorDefinition';
 export declare function defaultValueConverter(schemaType: string, schemaFormat: string, valueString: string): any;
 export declare function uuidToObjectIdString(sourceValue: string): string;
 export declare class TableConverter {
@@ -9,11 +10,12 @@ export declare class TableConverter {
     private client;
     private mongooseConnection;
     private options;
-    constructor(options: IConverterOptions);
-    convertTables(...options: ITableTranslation[]): Promise<void>;
-    generateSchemas(...options: ITableTranslation[]): Promise<void>;
+    constructor(options: ConverterOptions);
+    convertTables(...options: TableTranslation[]): Promise<void>;
+    createTranslatorDefinitions(...options: TableTranslation[]): Promise<TranslatorDefinition[]>;
+    generateSchemas(...options: TableTranslation[]): Promise<void>;
     private purgeClient();
-    private convertTable(options);
+    private createTranslatorDefinition(options, prepare);
     private convertTableInternal(options, prepare);
     private generateSchemasInternal(options, prepare);
     private prepareOptions(options);
