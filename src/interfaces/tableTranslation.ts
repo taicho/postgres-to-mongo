@@ -28,4 +28,5 @@ export interface TableTranslation {
     deleteFields?: string[];
     postProcess?: (options: TableTranslation, documents: any[]) => Promise<void> | void;
     customWhere?: string;
+    onPersist?: (options: TableTranslation, documents: any[]) => Promise<void> | void;
 }
