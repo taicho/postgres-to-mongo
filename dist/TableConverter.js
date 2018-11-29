@@ -239,13 +239,14 @@ class TableConverter {
         options = Object.assign({}, defaultTableTranslationOptions, options);
         options.columns = Object.assign({}, options.columns || {});
         options.toCollection = options.toCollection || (options.mongifyTableName ? Common_1.toMongoName(options.fromTable) : options.fromTable);
+        options.embedInParsed = this.parseEmbedIn(options.embedIn);
         return options;
     }
     gatherDepedencies(...translationOptions) {
         const graphDefinition = {};
-        for (const options of translationOptions) {
-            if (!options.ignoreDependencies) {
-                graphDefinition[options.embedIn ? options.fromTable : options.toCollection] = this.getDepedencyDefinition(options);
+        for (const option of translationOptions) {
+            if (!option.ignoreDependencies) {
+                graphDefinition[option.embedIn ? option.fromTable : option.toCollection] = this.getDepedencyDefinition(option, translationOptions);
             }
         }
         const collectionKeys = translationOptions.reduce((obj, curr) => {
@@ -275,17 +276,24 @@ class TableConverter {
         }
         return { graph, results };
     }
-    getDepedencyDefinition(translationOptions) {
+    getDepedencyDefinition(currentOption, otherOptions) {
         let deps = [];
-        if (translationOptions.addedDependencies) {
-            deps = deps.concat(translationOptions.addedDependencies);
+        if (currentOption.addedDependencies) {
+            deps = deps.concat(currentOption.addedDependencies);
         }
-        if (translationOptions.embedIn) {
-            deps.push(translationOptions.toCollection);
+        if (currentOption.embedIn) {
+            if (currentOption.embedInParsed.length === 1) {
+                deps.push(currentOption.toCollection);
+            }
+            else {
+                const parentName = currentOption.embedInParsed.slice(0, -1).join('.');
+                const parents = otherOptions.filter((o) => o.embedIn === parentName);
+                deps = deps.concat(parents.map((p) => p.fromTable));
+            }
         }
-        if (translationOptions.columns) {
-            for (const columnKey of Object.keys(translationOptions.columns)) {
-                const column = translationOptions.columns[columnKey];
+        if (currentOption.columns) {
+            for (const columnKey of Object.keys(currentOption.columns)) {
+                const column = currentOption.columns[columnKey];
                 if (column.translator) {
                     deps.push(column.translator.sourceCollection);
                 }
@@ -348,6 +356,9 @@ class TableConverter {
             }
             return obj;
         }, {}), translationOptions.columns);
+    }
+    parseEmbedIn(str) {
+        return str ? str.split('.') : null;
     }
     processColumnIndex(translationOptions, columnOptions) {
         return __awaiter(this, void 0, void 0, function* () {
@@ -584,10 +595,48 @@ class TableConverter {
                         newSchema.items = schema;
                     }
                 }
-                newSchema.title = translationOptions.embedIn;
-                parentSchema.properties[translationOptions.embedIn] = newSchema;
+                if (translationOptions.embedInParsed.length === 1) {
+                    newSchema.title = translationOptions.embedIn;
+                    parentSchema.properties[translationOptions.embedIn] = newSchema;
+                }
+                else {
+                    const title = translationOptions.embedInParsed.slice().pop();
+                    const slicedArray = translationOptions.embedInParsed.slice(0, translationOptions.embedInParsed.length - 1);
+                    const parentSchemaProperty = this.getJsonPropertyFromPathArray(slicedArray, parentSchema);
+                    if (parentSchemaProperty) {
+                        if (parentSchemaProperty.properties) {
+                            parentSchemaProperty.properties[title] = newSchema;
+                        }
+                        else {
+                            parentSchemaProperty.items.properties[title] = newSchema;
+                        }
+                    }
+                    else {
+                        throw new Error(`Unable to find path ${slicedArray.join('.')} in Schema(${parentSchema.title})`);
+                    }
+                }
             }
         }
+    }
+    getJsonPropertyFromPathArray(arr, obj) {
+        let currObject = obj;
+        for (const key of arr) {
+            if (currObject) {
+                let container = currObject;
+                let foundObject;
+                while (container && !foundObject) {
+                    container = currObject.properties || currObject.items;
+                    if (container) {
+                        foundObject = container[key];
+                    }
+                }
+                currObject = foundObject;
+            }
+            else {
+                return;
+            }
+        }
+        return currObject;
     }
     processJsonSchemaOptions(columnOptions, schemaType) {
         if (columnOptions.schemaOptions) {
@@ -759,46 +808,55 @@ class TableConverter {
                         }
                         count += rows.length;
                         if (documents.length) {
-                            if (!translationOptions.embedIn) {
+                            if (translationOptions.onPersist) {
                                 this.processDeletes(translationOptions, documents);
-                                try {
-                                    yield this.mongooseConnection.db.collection(translationOptions.toCollection).insertMany(documents);
-                                }
-                                catch (err) {
-                                    err.data = documents;
-                                    throw err;
-                                }
+                                yield translationOptions.onPersist(translationOptions, documents);
                             }
                             else {
-                                const sourceColumnName = translationOptions.embedSourceIdColumn;
-                                const groups = documents.reduce((obj, curr) => {
-                                    const group = obj[curr[sourceColumnName].toString()] = obj[curr[sourceColumnName].toString()] || { key: curr[sourceColumnName], docs: [] };
-                                    if (!translationOptions.preserveEmbedSourceId) {
-                                        delete curr[sourceColumnName];
-                                    }
-                                    group.docs.push(curr);
-                                    return obj;
-                                }, {});
-                                for (const groupKey of Object.keys(groups)) {
-                                    const group = groups[groupKey];
-                                    let finalValues = group.docs;
-                                    if (translationOptions.embedArrayField) {
-                                        finalValues = finalValues.map((d) => d[translationOptions.embedArrayField]);
-                                    }
-                                    const normalizedKeyValue = group.key;
-                                    const filter = {};
-                                    filter[translationOptions.embedTargetIdColumn] = typeof normalizedKeyValue === 'string' && normalizedKeyValue.length === 24 ? new mongoose.Types.ObjectId(normalizedKeyValue) : normalizedKeyValue;
-                                    let update = { $push: { [translationOptions.embedIn]: { $each: finalValues } } };
-                                    if (translationOptions.embedSingle) {
-                                        update = { $set: { [translationOptions.embedIn]: finalValues[0] } };
-                                    }
+                                if (!translationOptions.embedIn) {
                                     this.processDeletes(translationOptions, documents);
                                     try {
-                                        yield this.mongooseConnection.db.collection(translationOptions.toCollection).updateMany(filter, update);
+                                        yield this.mongooseConnection.db.collection(translationOptions.toCollection).insertMany(documents);
                                     }
                                     catch (err) {
                                         err.data = documents;
                                         throw err;
+                                    }
+                                }
+                                else {
+                                    if (translationOptions.embedInParsed.length > 1 && !translationOptions.onPersist) {
+                                        throw new Error('onPersist Function must be provided if embedding multiple levels.');
+                                    }
+                                    const sourceColumnName = translationOptions.embedSourceIdColumn;
+                                    const documentsBySourceColumnKey = documents.reduce((obj, curr) => {
+                                        const group = obj[curr[sourceColumnName].toString()] = obj[curr[sourceColumnName].toString()] || { key: curr[sourceColumnName], docs: [] };
+                                        if (!translationOptions.preserveEmbedSourceId) {
+                                            delete curr[sourceColumnName];
+                                        }
+                                        group.docs.push(curr);
+                                        return obj;
+                                    }, {});
+                                    for (const documentGroupKey of Object.keys(documentsBySourceColumnKey)) {
+                                        const documentGroup = documentsBySourceColumnKey[documentGroupKey];
+                                        let finalDocumentsOrValues = documentGroup.docs;
+                                        if (translationOptions.embedArrayField) {
+                                            finalDocumentsOrValues = finalDocumentsOrValues.map((d) => d[translationOptions.embedArrayField]);
+                                        }
+                                        const normalizedKeyValue = documentGroup.key;
+                                        const filter = {};
+                                        filter[translationOptions.embedTargetIdColumn] = typeof normalizedKeyValue === 'string' && normalizedKeyValue.length === 24 ? new mongoose.Types.ObjectId(normalizedKeyValue) : normalizedKeyValue;
+                                        let update = { $push: { [translationOptions.embedIn]: { $each: finalDocumentsOrValues } } };
+                                        if (translationOptions.embedSingle) {
+                                            update = { $set: { [translationOptions.embedIn]: finalDocumentsOrValues[0] } };
+                                        }
+                                        this.processDeletes(translationOptions, documents);
+                                        try {
+                                            yield this.mongooseConnection.db.collection(translationOptions.toCollection).updateMany(filter, update);
+                                        }
+                                        catch (err) {
+                                            err.data = documents;
+                                            throw err;
+                                        }
                                     }
                                 }
                             }

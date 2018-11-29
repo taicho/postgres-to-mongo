@@ -15,6 +15,7 @@ import * as Database from './Database';
 import { ConverterOptions } from './interfaces/converterOptions';
 import { PostgresColumnInfo } from './interfaces/postgresColumnInfo';
 import { TableTranslation } from './interfaces/tableTranslation';
+import { TableTranslationInternal } from './interfaces/tableTranslationInternal';
 import { TranslatorDefinition } from './interfaces/translatorDefinition';
 const log = debug('postgres-to-mongo:TableConverter');
 
@@ -78,7 +79,7 @@ export class TableConverter {
 
     public async convertTables(...options: TableTranslation[]) {
         options = options.map((o) => this.prepareOptions(o));
-        const dependencies = this.gatherDepedencies(...options);
+        const dependencies = this.gatherDepedencies(...options as TableTranslationInternal[]);
         for (const tableOptions of dependencies.results) {
             try {
                 await this.convertTableInternal(tableOptions, false);
@@ -96,7 +97,7 @@ export class TableConverter {
     public async createTranslatorDefinitions(...options: TableTranslation[]): Promise<TranslatorDefinition[]> {
         const translatorDefinitions: TranslatorDefinition[] = [];
         options = options.map((o) => this.prepareOptions(o));
-        const dependencies = this.gatherDepedencies(...options);
+        const dependencies = this.gatherDepedencies(...options as TableTranslationInternal[]);
         for (const tableOptions of dependencies.results) {
             try {
                 const definition = await this.createTranslatorDefinition(tableOptions, false);
@@ -117,7 +118,7 @@ export class TableConverter {
 
     public async generateSchemas(...options: TableTranslation[]) {
         options = options.map((o) => this.prepareOptions(o));
-        const dependencies = this.gatherDepedencies(...options);
+        const dependencies = this.gatherDepedencies(...options as TableTranslationInternal[]);
         for (const tableOptions of dependencies.results) {
             try {
                 await this.generateSchemasInternal(tableOptions, false);
@@ -139,7 +140,7 @@ export class TableConverter {
         }
     }
 
-    private async createTranslatorDefinition(options: TableTranslation, prepare: boolean): Promise<TranslatorDefinition> {
+    private async createTranslatorDefinition(options: TableTranslationInternal, prepare: boolean): Promise<TranslatorDefinition> {
         if (!options.fromSchema) {
             throw new Error('options.fromSchema must be defined.');
         }
@@ -178,7 +179,7 @@ export class TableConverter {
         return translatorDefinition;
     }
 
-    private async convertTableInternal(options: TableTranslation, prepare: boolean) {
+    private async convertTableInternal(options: TableTranslationInternal, prepare: boolean) {
         if (!options.fromSchema) {
             throw new Error('options.fromSchema must be defined.');
         }
@@ -203,7 +204,7 @@ export class TableConverter {
         await this.processRecords(options, columns, null);
     }
 
-    private async generateSchemasInternal(options: TableTranslation, prepare: boolean) {
+    private async generateSchemasInternal(options: TableTranslationInternal, prepare: boolean) {
         if (!options.fromSchema) {
             throw new Error('options.fromSchema must be defined.');
         }
@@ -227,18 +228,19 @@ export class TableConverter {
         return this.generateSchema(options, columns);
     }
 
-    private prepareOptions(options: TableTranslation) {
+    private prepareOptions(options: TableTranslation): TableTranslationInternal {
         options = Object.assign({}, defaultTableTranslationOptions, options);
         options.columns = Object.assign({}, options.columns || {});
         options.toCollection = options.toCollection || (options.mongifyTableName ? toMongoName(options.fromTable) : options.fromTable);
-        return options;
+        (options as TableTranslationInternal).embedInParsed = this.parseEmbedIn(options.embedIn);
+        return options as TableTranslationInternal;
     }
 
-    private gatherDepedencies(...translationOptions: TableTranslation[]) {
+    private gatherDepedencies(...translationOptions: TableTranslationInternal[]) {
         const graphDefinition: any = {};
-        for (const options of translationOptions) {
-            if (!options.ignoreDependencies) {
-                graphDefinition[options.embedIn ? options.fromTable : options.toCollection] = this.getDepedencyDefinition(options);
+        for (const option of translationOptions) {
+            if (!option.ignoreDependencies) {
+                graphDefinition[option.embedIn ? option.fromTable : option.toCollection] = this.getDepedencyDefinition(option, translationOptions);
             }
         }
         const collectionKeys = translationOptions.reduce((obj, curr) => {
@@ -268,17 +270,23 @@ export class TableConverter {
         return { graph, results };
     }
 
-    private getDepedencyDefinition(translationOptions: TableTranslation) {
+    private getDepedencyDefinition(currentOption: TableTranslationInternal, otherOptions: TableTranslationInternal[]) {
         let deps = [];
-        if (translationOptions.addedDependencies) {
-            deps = deps.concat(translationOptions.addedDependencies);
+        if (currentOption.addedDependencies) {
+            deps = deps.concat(currentOption.addedDependencies);
         }
-        if (translationOptions.embedIn) {
-            deps.push(translationOptions.toCollection);
+        if (currentOption.embedIn) {
+            if (currentOption.embedInParsed.length === 1) {
+                deps.push(currentOption.toCollection);
+            } else {
+                const parentName = currentOption.embedInParsed.slice(0, -1).join('.');
+                const parents = otherOptions.filter((o) => o.embedIn === parentName);
+                deps = deps.concat(parents.map((p) => p.fromTable));
+            }
         }
-        if (translationOptions.columns) {
-            for (const columnKey of Object.keys(translationOptions.columns)) {
-                const column = translationOptions.columns[columnKey];
+        if (currentOption.columns) {
+            for (const columnKey of Object.keys(currentOption.columns)) {
+                const column = currentOption.columns[columnKey];
                 if (column.translator) {
                     deps.push(column.translator.sourceCollection);
                 }
@@ -321,14 +329,14 @@ export class TableConverter {
         log(str);
     }
 
-    private hasColumns(options: TableTranslation) {
+    private hasColumns(options: TableTranslationInternal) {
         if (options.columns && Object.keys(options.columns).length) {
             return true;
         }
         return false;
     }
 
-    private applyLegacyId(translationOptions: TableTranslation, columns: { [index: string]: PostgresColumnInfo }) {
+    private applyLegacyId(translationOptions: TableTranslationInternal, columns: { [index: string]: PostgresColumnInfo }) {
         if (translationOptions.autoLegacyId && !('id' in translationOptions.columns) && 'id' in columns) {
             translationOptions.columns.id = {
                 to: translationOptions.legacyIdDestinationName,
@@ -337,7 +345,7 @@ export class TableConverter {
         }
     }
 
-    private addMissingColumns(translationOptions: TableTranslation, columns: { [index: string]: PostgresColumnInfo }) {
+    private addMissingColumns(translationOptions: TableTranslationInternal, columns: { [index: string]: PostgresColumnInfo }) {
         translationOptions.columns = Object.assign({}, Object.keys(columns).reduce((obj, curr) => {
             if (!(curr in translationOptions.columns)) {
                 obj[curr] = { to: translationOptions.mongifyColumnNames ? toMongoName(curr) : curr };
@@ -348,7 +356,11 @@ export class TableConverter {
         }, {}), translationOptions.columns);
     }
 
-    private async processColumnIndex(translationOptions: TableTranslation, columnOptions: ColumnTranslation) {
+    private parseEmbedIn(str: string) {
+        return str ? str.split('.') : null;
+    }
+
+    private async processColumnIndex(translationOptions: TableTranslationInternal, columnOptions: ColumnTranslation) {
         let indexOptions = null;
         if (typeof columnOptions.index === 'boolean') {
             indexOptions = { background: true };
@@ -368,7 +380,7 @@ export class TableConverter {
         return str.split('.').reduce((o, i) => o[i], obj);
     }
 
-    private processDeletes(options: TableTranslation, documents: any[]) {
+    private processDeletes(options: TableTranslationInternal, documents: any[]) {
         if (options.deleteFields) {
             for (const doc of documents) {
                 for (const field of options.deleteFields) {
@@ -444,7 +456,7 @@ export class TableConverter {
         }
     }
 
-    private generateSchema(translationOptions: TableTranslation, columns: { [index: string]: PostgresColumnInfo }) {
+    private generateSchema(translationOptions: TableTranslationInternal, columns: { [index: string]: PostgresColumnInfo }) {
         this.processOptions(translationOptions, columns);
         this.log(`Generating Schema '${translationOptions.embedIn ? `${translationOptions.embedIn} -> ${translationOptions.toCollection}` : translationOptions.toCollection}'`);
         const schema: any = {
@@ -576,10 +588,45 @@ export class TableConverter {
                         newSchema.items = schema;
                     }
                 }
-                newSchema.title = translationOptions.embedIn;
-                parentSchema.properties[translationOptions.embedIn] = newSchema;
+                if (translationOptions.embedInParsed.length === 1) {
+                    newSchema.title = translationOptions.embedIn;
+                    parentSchema.properties[translationOptions.embedIn] = newSchema;
+                } else {
+                    const title = translationOptions.embedInParsed.slice().pop();
+                    const slicedArray = translationOptions.embedInParsed.slice(0, translationOptions.embedInParsed.length - 1);
+                    const parentSchemaProperty = this.getJsonPropertyFromPathArray(slicedArray, parentSchema);
+                    if (parentSchemaProperty) {
+                        if(parentSchemaProperty.properties) {
+                            parentSchemaProperty.properties[title] = newSchema;
+                        } else {
+                            parentSchemaProperty.items.properties[title] = newSchema;
+                        }
+                    } else {
+                        throw new Error(`Unable to find path ${slicedArray.join('.')} in Schema(${parentSchema.title})`);
+                    }
+                }
             }
         }
+    }
+
+    private getJsonPropertyFromPathArray(arr: string[], obj: any) {
+        let currObject = obj;
+        for (const key of arr) {
+            if (currObject) {
+                let container = currObject;
+                let foundObject;
+                while (container && !foundObject) {
+                    container = currObject.properties || currObject.items;
+                    if (container) {
+                        foundObject = container[key];
+                    }
+                }
+                currObject = foundObject;
+            } else {
+                return;
+            }
+        }
+        return currObject;
     }
 
     private processJsonSchemaOptions(columnOptions: ColumnTranslation, schemaType: any) {
@@ -594,7 +641,7 @@ export class TableConverter {
         return schemaType;
     }
 
-    private processOptions(translationOptions: TableTranslation, columns: { [index: string]: PostgresColumnInfo }) {
+    private processOptions(translationOptions: TableTranslationInternal, columns: { [index: string]: PostgresColumnInfo }) {
         if (translationOptions.embedSourceIdColumn) {
             translationOptions.embedSourceIdColumn = translationOptions.mongifyColumnNames ? toMongoName(translationOptions.embedSourceIdColumn) : translationOptions.embedSourceIdColumn;
         }
@@ -613,7 +660,7 @@ export class TableConverter {
         }
     }
 
-    private async processRecords(translationOptions: TableTranslation, columns: { [index: string]: PostgresColumnInfo }, cursor: any, totalCount: number = 0, count = 0) {
+    private async processRecords(translationOptions: TableTranslationInternal, columns: { [index: string]: PostgresColumnInfo }, cursor: any, totalCount: number = 0, count = 0) {
         return new Promise(async (resolve) => {
             if (!cursor) {
                 const countRow = await this.queryPostgres(`SELECT COUNT(*) FROM "${translationOptions.fromSchema}"."${translationOptions.fromTable}" ${translationOptions.customWhere ? `WHERE ${translationOptions.customWhere}` : ''};`);
@@ -750,43 +797,51 @@ export class TableConverter {
                     }
                     count += rows.length;
                     if (documents.length) {
-                        if (!translationOptions.embedIn) {
+                        if (translationOptions.onPersist) {
                             this.processDeletes(translationOptions, documents);
-                            try {
-                                await this.mongooseConnection.db.collection(translationOptions.toCollection).insertMany(documents);
-                            } catch (err) {
-                                err.data = documents;
-                                throw err;
-                            }
+                            await translationOptions.onPersist(translationOptions, documents);
                         } else {
-                            const sourceColumnName = translationOptions.embedSourceIdColumn;
-                            const groups = documents.reduce((obj, curr) => {
-                                const group = obj[curr[sourceColumnName].toString()] = obj[curr[sourceColumnName].toString()] || { key: curr[sourceColumnName], docs: [] };
-                                if (!translationOptions.preserveEmbedSourceId) {
-                                    delete curr[sourceColumnName];
-                                }
-                                group.docs.push(curr);
-                                return obj;
-                            }, {});
-                            for (const groupKey of Object.keys(groups)) {
-                                const group = groups[groupKey];
-                                let finalValues = group.docs;
-                                if (translationOptions.embedArrayField) {
-                                    finalValues = finalValues.map((d) => d[translationOptions.embedArrayField]);
-                                }
-                                const normalizedKeyValue = group.key;
-                                const filter: any = {};
-                                filter[translationOptions.embedTargetIdColumn] = typeof normalizedKeyValue === 'string' && normalizedKeyValue.length === 24 ? new mongoose.Types.ObjectId(normalizedKeyValue) : normalizedKeyValue;
-                                let update: any = { $push: { [translationOptions.embedIn]: { $each: finalValues } } };
-                                if (translationOptions.embedSingle) {
-                                    update = { $set: { [translationOptions.embedIn]: finalValues[0] } };
-                                }
+                            if (!translationOptions.embedIn) {
                                 this.processDeletes(translationOptions, documents);
                                 try {
-                                    await this.mongooseConnection.db.collection(translationOptions.toCollection).updateMany(filter, update);
+                                    await this.mongooseConnection.db.collection(translationOptions.toCollection).insertMany(documents);
                                 } catch (err) {
                                     err.data = documents;
                                     throw err;
+                                }
+                            } else {
+                                if (translationOptions.embedInParsed.length > 1 && !translationOptions.onPersist) {
+                                    throw new Error('onPersist Function must be provided if embedding multiple levels.');
+                                }
+                                const sourceColumnName = translationOptions.embedSourceIdColumn;
+                                const documentsBySourceColumnKey = documents.reduce((obj, curr) => {
+                                    const group = obj[curr[sourceColumnName].toString()] = obj[curr[sourceColumnName].toString()] || { key: curr[sourceColumnName], docs: [] };
+                                    if (!translationOptions.preserveEmbedSourceId) {
+                                        delete curr[sourceColumnName];
+                                    }
+                                    group.docs.push(curr);
+                                    return obj;
+                                }, {});
+                                for (const documentGroupKey of Object.keys(documentsBySourceColumnKey)) {
+                                    const documentGroup = documentsBySourceColumnKey[documentGroupKey];
+                                    let finalDocumentsOrValues = documentGroup.docs;
+                                    if (translationOptions.embedArrayField) {
+                                        finalDocumentsOrValues = finalDocumentsOrValues.map((d) => d[translationOptions.embedArrayField]);
+                                    }
+                                    const normalizedKeyValue = documentGroup.key;
+                                    const filter: any = {};
+                                    filter[translationOptions.embedTargetIdColumn] = typeof normalizedKeyValue === 'string' && normalizedKeyValue.length === 24 ? new mongoose.Types.ObjectId(normalizedKeyValue) : normalizedKeyValue;
+                                    let update: any = { $push: { [translationOptions.embedIn]: { $each: finalDocumentsOrValues } } };
+                                    if (translationOptions.embedSingle) {
+                                        update = { $set: { [translationOptions.embedIn]: finalDocumentsOrValues[0] } };
+                                    }
+                                    this.processDeletes(translationOptions, documents);
+                                    try {
+                                        await this.mongooseConnection.db.collection(translationOptions.toCollection).updateMany(filter, update);
+                                    } catch (err) {
+                                        err.data = documents;
+                                        throw err;
+                                    }
                                 }
                             }
                         }
