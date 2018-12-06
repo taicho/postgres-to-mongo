@@ -601,6 +601,7 @@ class TableConverter {
                 }
                 else {
                     const title = translationOptions.embedInParsed.slice().pop();
+                    newSchema.title = title;
                     const slicedArray = translationOptions.embedInParsed.slice(0, translationOptions.embedInParsed.length - 1);
                     const parentSchemaProperty = this.getJsonPropertyFromPathArray(slicedArray, parentSchema);
                     if (parentSchemaProperty) {

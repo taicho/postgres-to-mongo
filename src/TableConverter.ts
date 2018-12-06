@@ -593,10 +593,11 @@ export class TableConverter {
                     parentSchema.properties[translationOptions.embedIn] = newSchema;
                 } else {
                     const title = translationOptions.embedInParsed.slice().pop();
+                    newSchema.title = title;
                     const slicedArray = translationOptions.embedInParsed.slice(0, translationOptions.embedInParsed.length - 1);
                     const parentSchemaProperty = this.getJsonPropertyFromPathArray(slicedArray, parentSchema);
                     if (parentSchemaProperty) {
-                        if(parentSchemaProperty.properties) {
+                        if (parentSchemaProperty.properties) {
                             parentSchemaProperty.properties[title] = newSchema;
                         } else {
                             parentSchemaProperty.items.properties[title] = newSchema;
