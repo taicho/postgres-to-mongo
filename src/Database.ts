@@ -19,7 +19,7 @@ export function getMongoConnection(uri: string) {
 }
 
 export async function getPostgresConnection(uri: string, ssl = false) {
-    const pool = pools[uri] = pools[uri] || new pg.Pool({ ssl, connectionString: uri });
+    const pool: pg.Pool = pools[uri] = pools[uri] || new pg.Pool({ ssl, connectionString: uri });
     return new Promise<any>(async (resolve) => {
         const client = await pool.connect();
         resolve(client);

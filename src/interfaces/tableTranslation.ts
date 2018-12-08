@@ -5,6 +5,7 @@ export interface TableTranslation {
     fromTable: string;
     toCollection?: string;
     embedIn?: string;
+    embedInRoot?: boolean;
     embedSingle?: boolean;
     embedSourceIdColumn?: string;
     embedTargetIdColumn?: string;
@@ -29,4 +30,5 @@ export interface TableTranslation {
     postProcess?: (options: TableTranslation, documents: any[]) => Promise<void> | void;
     customWhere?: string;
     onPersist?: (options: TableTranslation, documents: any[]) => Promise<void> | void;
+    ignoreDeletesOnPersist?: boolean;
 }

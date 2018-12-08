@@ -206,6 +206,7 @@ class TableConverter {
             this.log(`Processing records for ${options.fromTable} => ${options.toCollection}.`);
             this.log('Metadata Fetched.');
             const columns = yield this.getAllColumns(options.fromSchema, options.fromTable);
+            this.log('Columns Fetched.');
             yield this.processRecords(options, columns, null);
         });
     }
@@ -235,29 +236,42 @@ class TableConverter {
             return this.generateSchema(options, columns);
         });
     }
+    validateOptions(options) {
+        if (options.embedInParsed && options.embedInParsed.length > 1) {
+            if (!options.onPersist) {
+                throw new Error('Deep sub document embeds not supported without onPersist.');
+            }
+        }
+        if ((options.embedIn || options.embedInRoot) && !options.toCollection) {
+            throw new Error('Embeds require toCollection.');
+        }
+    }
     prepareOptions(options) {
         options = Object.assign({}, defaultTableTranslationOptions, options);
         options.columns = Object.assign({}, options.columns || {});
         options.toCollection = options.toCollection || (options.mongifyTableName ? Common_1.toMongoName(options.fromTable) : options.fromTable);
-        options.embedInParsed = this.parseEmbedIn(options.embedIn);
+        const internalOptions = options;
+        internalOptions.embedInParsed = this.parseEmbedIn(options.embedIn);
+        internalOptions.hasEmbed = !!(internalOptions.embedIn || internalOptions.embedInRoot);
+        this.validateOptions(internalOptions);
         return options;
     }
     gatherDepedencies(...translationOptions) {
         const graphDefinition = {};
         for (const option of translationOptions) {
             if (!option.ignoreDependencies) {
-                graphDefinition[option.embedIn ? option.fromTable : option.toCollection] = this.getDepedencyDefinition(option, translationOptions);
+                graphDefinition[option.hasEmbed ? option.fromTable : option.toCollection] = this.getDepedencyDefinition(option, translationOptions);
             }
         }
         const collectionKeys = translationOptions.reduce((obj, curr) => {
-            if (!curr.embedIn) {
+            if (!curr.hasEmbed) {
                 const arr = obj[curr.toCollection] = obj[curr.toCollection] || [];
                 arr.push(curr);
             }
             return obj;
         }, {});
         const tableKeys = translationOptions.reduce((obj, curr) => {
-            if (curr.embedIn) {
+            if (curr.hasEmbed) {
                 const arr = obj[curr.fromTable] = obj[curr.fromTable] || [];
                 arr.push(curr);
             }
@@ -281,8 +295,8 @@ class TableConverter {
         if (currentOption.addedDependencies) {
             deps = deps.concat(currentOption.addedDependencies);
         }
-        if (currentOption.embedIn) {
-            if (currentOption.embedInParsed.length === 1) {
+        if (currentOption.hasEmbed) {
+            if (currentOption.embedInRoot || currentOption.embedInParsed.length === 1) {
                 deps.push(currentOption.toCollection);
             }
             else {
@@ -369,7 +383,7 @@ class TableConverter {
             else {
                 indexOptions = Object.assign({}, columnOptions.index, { background: true });
             }
-            if (translationOptions.embedIn) {
+            if (translationOptions.hasEmbed && !translationOptions.embedInRoot) {
                 indexOptions.sparse = true;
                 const cleanEmbedName = `${translationOptions.embedIn.replace(/\.\$/g, '')}.${columnOptions.to}`;
                 yield this.mongooseConnection.db.collection(translationOptions.toCollection).createIndex({ [cleanEmbedName]: 1 }, indexOptions);
@@ -457,7 +471,7 @@ class TableConverter {
     }
     generateSchema(translationOptions, columns) {
         this.processOptions(translationOptions, columns);
-        this.log(`Generating Schema '${translationOptions.embedIn ? `${translationOptions.embedIn} -> ${translationOptions.toCollection}` : translationOptions.toCollection}'`);
+        this.log(`Generating Schema '${translationOptions.hasEmbed ? `${translationOptions.fromTable} -> ${translationOptions.toCollection}` : translationOptions.toCollection}'`);
         const schema = {
             type: 'object',
             properties: {},
@@ -540,7 +554,7 @@ class TableConverter {
                 }
             }
         }
-        if (!translationOptions.embedIn) {
+        if (!translationOptions.hasEmbed) {
             schema.title = translationOptions.toCollection;
             let currentSchema = this.generatedSchemas[translationOptions.toCollection];
             if (currentSchema) {
@@ -587,7 +601,7 @@ class TableConverter {
                 }
                 else {
                     delete schema.properties[translationOptions.embedSourceIdColumn];
-                    if (translationOptions.embedSingle) {
+                    if (translationOptions.embedSingle || translationOptions.embedInRoot) {
                         delete schema.properties._id;
                         newSchema = schema;
                     }
@@ -595,9 +609,14 @@ class TableConverter {
                         newSchema.items = schema;
                     }
                 }
-                if (translationOptions.embedInParsed.length === 1) {
-                    newSchema.title = translationOptions.embedIn;
-                    parentSchema.properties[translationOptions.embedIn] = newSchema;
+                if (translationOptions.embedInRoot || translationOptions.embedInParsed.length === 1) {
+                    if (!translationOptions.embedInRoot) {
+                        newSchema.title = translationOptions.embedIn;
+                        parentSchema.properties[translationOptions.embedIn] = newSchema;
+                    }
+                    else {
+                        Object.assign(parentSchema.properties, newSchema.properties);
+                    }
                 }
                 else {
                     const title = translationOptions.embedInParsed.slice().pop();
@@ -658,7 +677,7 @@ class TableConverter {
         this.applyLegacyId(translationOptions, columns);
         this.addMissingColumns(translationOptions, columns);
         const columnToKeys = Object.keys(translationOptions.columns).reduce((obj, curr) => { obj[translationOptions.columns[curr].to] = null; return obj; }, {});
-        if (translationOptions.embedIn && !(translationOptions.embedSourceIdColumn in columnToKeys)) {
+        if (translationOptions.hasEmbed && !(translationOptions.embedSourceIdColumn in columnToKeys)) {
             if (!(translationOptions.embedSourceIdColumn in columns)) {
                 throw new Error(`Embed Source Id Column (${translationOptions.embedSourceIdColumn}) not found in Source Dataset.`);
             }
@@ -673,10 +692,12 @@ class TableConverter {
         return __awaiter(this, void 0, void 0, function* () {
             return new Promise((resolve) => __awaiter(this, void 0, void 0, function* () {
                 if (!cursor) {
+                    log('Getting cursor');
                     const countRow = yield this.queryPostgres(`SELECT COUNT(*) FROM "${translationOptions.fromSchema}"."${translationOptions.fromTable}" ${translationOptions.customWhere ? `WHERE ${translationOptions.customWhere}` : ''};`);
                     totalCount = typeof countRow[0].count === 'string' ? parseInt(countRow[0].count) : countRow[0].count;
                     this.processOptions(translationOptions, columns);
                     if (totalCount > 0) {
+                        log('Got count.');
                         const selectColumns = Object.keys(columns).reduce((obj, key) => {
                             const curr = columns[key];
                             if (curr.data_type.toLowerCase() === 'user-defined' && (curr.udt_name === 'geography' || curr.udt_name === 'geometry')) {
@@ -694,6 +715,7 @@ class TableConverter {
                     for (const index of translationOptions.indexes) {
                         const indexOptions = Object.assign({}, index.options || {}, { background: true });
                         yield this.mongooseConnection.db.collection(translationOptions.toCollection).createIndex(index.descriptor, indexOptions);
+                        log('Applied indexes.');
                     }
                 }
                 if (totalCount === 0) {
@@ -706,8 +728,11 @@ class TableConverter {
                     });
                 }
                 else {
+                    log('Started cursor read.');
                     cursor.read(this.options.batchSize, (err, rows) => __awaiter(this, void 0, void 0, function* () {
+                        log('Reading rows.');
                         if (rows.length === 0) {
+                            log('No rows.');
                             return resolve();
                         }
                         let documents = [];
@@ -736,7 +761,7 @@ class TableConverter {
                                 if (!document._id) {
                                     document._id = new mongoose.Types.ObjectId();
                                 }
-                                if (translationOptions.embedIn) {
+                                if (translationOptions.hasEmbed && !translationOptions.embedInRoot) {
                                     yield this.processColumnIndex(translationOptions, { to: '_id', index: { unique: true } });
                                 }
                             }
@@ -752,11 +777,13 @@ class TableConverter {
                             documents.push(document);
                         }
                         if (translationOptions.postProcess) {
+                            log('Executing Post Process.');
                             const promise = translationOptions.postProcess(translationOptions, documents);
                             if (promise && promise.then) {
                                 yield promise;
                             }
                         }
+                        log('Executing Translations.');
                         for (const columnKey of Object.keys(translationOptions.columns)) {
                             const column = translationOptions.columns[columnKey];
                             if (column.translator) {
@@ -801,8 +828,10 @@ class TableConverter {
                                 }
                             }
                         }
+                        log('Done Executing Translations.');
                         if (translationOptions.filter) {
                             const documentCount = documents.length;
+                            log('Executing Filter.');
                             documents = documents.filter(translationOptions.filter);
                             const amountRemoved = documentCount - documents.length;
                             this.log(`Filtered - Removed ${amountRemoved} of ${documentCount}.`);
@@ -810,11 +839,15 @@ class TableConverter {
                         count += rows.length;
                         if (documents.length) {
                             if (translationOptions.onPersist) {
-                                this.processDeletes(translationOptions, documents);
+                                log('Executing OnPersist.');
+                                if (!translationOptions.ignoreDeletesOnPersist) {
+                                    this.processDeletes(translationOptions, documents);
+                                }
                                 yield translationOptions.onPersist(translationOptions, documents);
+                                log('Done Executing OnPersist.');
                             }
                             else {
-                                if (!translationOptions.embedIn) {
+                                if (!translationOptions.hasEmbed) {
                                     this.processDeletes(translationOptions, documents);
                                     try {
                                         yield this.mongooseConnection.db.collection(translationOptions.toCollection).insertMany(documents);
@@ -825,9 +858,6 @@ class TableConverter {
                                     }
                                 }
                                 else {
-                                    if (translationOptions.embedInParsed.length > 1 && !translationOptions.onPersist) {
-                                        throw new Error('onPersist Function must be provided if embedding multiple levels.');
-                                    }
                                     const sourceColumnName = translationOptions.embedSourceIdColumn;
                                     const documentsBySourceColumnKey = documents.reduce((obj, curr) => {
                                         const group = obj[curr[sourceColumnName].toString()] = obj[curr[sourceColumnName].toString()] || { key: curr[sourceColumnName], docs: [] };
@@ -847,6 +877,9 @@ class TableConverter {
                                         const filter = {};
                                         filter[translationOptions.embedTargetIdColumn] = typeof normalizedKeyValue === 'string' && normalizedKeyValue.length === 24 ? new mongoose.Types.ObjectId(normalizedKeyValue) : normalizedKeyValue;
                                         let update = { $push: { [translationOptions.embedIn]: { $each: finalDocumentsOrValues } } };
+                                        if (translationOptions.embedInRoot) {
+                                            update = { $set: finalDocumentsOrValues[0] };
+                                        }
                                         if (translationOptions.embedSingle) {
                                             update = { $set: { [translationOptions.embedIn]: finalDocumentsOrValues[0] } };
                                         }

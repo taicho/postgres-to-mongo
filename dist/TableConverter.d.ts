@@ -1,5 +1,6 @@
 import { ConverterOptions } from './interfaces/converterOptions';
 import { TableTranslation } from './interfaces/tableTranslation';
+import { TableTranslationInternal } from './interfaces/tableTranslationInternal';
 import { TranslatorDefinition } from './interfaces/translatorDefinition';
 export declare function defaultValueConverter(schemaType: string, schemaFormat: string, valueString: string): any;
 export declare function uuidToObjectIdString(sourceValue: string): string;
@@ -18,6 +19,7 @@ export declare class TableConverter {
     private createTranslatorDefinition(options, prepare);
     private convertTableInternal(options, prepare);
     private generateSchemasInternal(options, prepare);
+    validateOptions(options: TableTranslationInternal): void;
     private prepareOptions(options);
     private gatherDepedencies(...translationOptions);
     private getDepedencyDefinition(currentOption, otherOptions);
