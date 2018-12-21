@@ -688,6 +688,28 @@ class TableConverter {
             });
         }
     }
+    insertDocuments(translationOptions, documents) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                yield this.mongooseConnection.db.collection(translationOptions.toCollection).insertMany(documents);
+            }
+            catch (err) {
+                err.data = documents;
+                if (err.index > -1) {
+                    const msg = `Error inserting document at index ${err.index}, trying again without (attempting to recover). Error: ${err}`;
+                    log(msg);
+                    console.log(msg);
+                    const newDocuments = documents.slice(err.index + 1);
+                    if (newDocuments.length) {
+                        yield this.insertDocuments(translationOptions, newDocuments);
+                    }
+                }
+                else {
+                    throw err;
+                }
+            }
+        });
+    }
     processRecords(translationOptions, columns, cursor, totalCount = 0, count = 0) {
         return __awaiter(this, void 0, void 0, function* () {
             return new Promise((resolve) => __awaiter(this, void 0, void 0, function* () {
@@ -849,13 +871,7 @@ class TableConverter {
                             else {
                                 if (!translationOptions.hasEmbed) {
                                     this.processDeletes(translationOptions, documents);
-                                    try {
-                                        yield this.mongooseConnection.db.collection(translationOptions.toCollection).insertMany(documents);
-                                    }
-                                    catch (err) {
-                                        err.data = documents;
-                                        throw err;
-                                    }
+                                    yield this.insertDocuments(translationOptions, documents);
                                 }
                                 else {
                                     const sourceColumnName = translationOptions.embedSourceIdColumn;

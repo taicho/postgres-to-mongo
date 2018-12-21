@@ -37,6 +37,7 @@ export declare class TableConverter {
     private getJsonPropertyFromPathArray(arr, obj);
     private processJsonSchemaOptions(columnOptions, schemaType);
     private processOptions(translationOptions, columns);
+    private insertDocuments(translationOptions, documents);
     private processRecords(translationOptions, columns, cursor, totalCount?, count?);
     private getConverter(metadata);
     private queryPostgres<T>(queryString);

@@ -684,6 +684,26 @@ export class TableConverter {
         }
     }
 
+    private async insertDocuments(translationOptions: TableTranslation, documents: any[]) {
+        try {
+            await this.mongooseConnection.db.collection(translationOptions.toCollection).insertMany(documents);
+        } catch (err) {
+            err.data = documents;
+            if (err.index > -1) {
+                const msg = `Error inserting document at index ${err.index}, trying again without (attempting to recover). Error: ${err}`;
+                log(msg);
+                // tslint:disable-next-line:no-console
+                console.log(msg);
+                const newDocuments = documents.slice(err.index + 1);
+                if (newDocuments.length) {
+                    await this.insertDocuments(translationOptions, newDocuments);
+                }
+            } else {
+                throw err;
+            }
+        }
+    }
+
     private async processRecords(translationOptions: TableTranslationInternal, columns: { [index: string]: PostgresColumnInfo }, cursor: any, totalCount: number = 0, count = 0) {
         return new Promise(async (resolve) => {
             if (!cursor) {
@@ -814,9 +834,6 @@ export class TableConverter {
                                 for (const idObject of ids) {
                                     const lookupObject = { key: idObject[column.translator.sourceIdField], desiredValue: idObject[desiredField] };
                                     const lookupResult = uniqueKeys[lookupObject.key];
-                                    // if (!lookupResult) {
-                                    //     debugger;
-                                    // }
                                     for (const doc of lookupResult.docs) {
                                         doc[column.to] = lookupObject.desiredValue;
                                     }
@@ -844,12 +861,7 @@ export class TableConverter {
                         } else {
                             if (!translationOptions.hasEmbed) {
                                 this.processDeletes(translationOptions, documents);
-                                try {
-                                    await this.mongooseConnection.db.collection(translationOptions.toCollection).insertMany(documents);
-                                } catch (err) {
-                                    err.data = documents;
-                                    throw err;
-                                }
+                                await this.insertDocuments(translationOptions, documents);
                             } else {
                                 const sourceColumnName = translationOptions.embedSourceIdColumn;
                                 const documentsBySourceColumnKey = documents.reduce((obj, curr) => {
