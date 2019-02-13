@@ -469,6 +469,24 @@ class TableConverter {
                 throw new Error('Found unsupported type!!! Create a converter or submit an issue!');
         }
     }
+    overwriteMergeArray(destinationArray, sourceArray) {
+        if (destinationArray.length
+            && sourceArray.length
+            && typeof destinationArray[0] === 'string'
+            && typeof sourceArray[0] === 'string') {
+            const keys = {};
+            for (const val of destinationArray) {
+                keys[val] = null;
+            }
+            for (const val of sourceArray) {
+                keys[val] = null;
+            }
+            return Object.keys(keys);
+        }
+        else {
+            return sourceArray;
+        }
+    }
     generateSchema(translationOptions, columns) {
         this.processOptions(translationOptions, columns);
         this.log(`Generating Schema '${translationOptions.hasEmbed ? `${translationOptions.fromTable} -> ${translationOptions.toCollection}` : translationOptions.toCollection}'`);
@@ -558,25 +576,7 @@ class TableConverter {
             schema.title = translationOptions.toCollection;
             let currentSchema = this.generatedSchemas[translationOptions.toCollection];
             if (currentSchema) {
-                function overwriteMerge(destinationArray, sourceArray) {
-                    if (destinationArray.length
-                        && sourceArray.length
-                        && typeof destinationArray[0] === 'string'
-                        && typeof sourceArray[0] === 'string') {
-                        const keys = {};
-                        for (const val of destinationArray) {
-                            keys[val] = null;
-                        }
-                        for (const val of sourceArray) {
-                            keys[val] = null;
-                        }
-                        return Object.keys(keys);
-                    }
-                    else {
-                        return sourceArray;
-                    }
-                }
-                currentSchema = deepmerge(currentSchema, schema, { arrayMerge: overwriteMerge });
+                currentSchema = deepmerge(currentSchema, schema, { arrayMerge: this.overwriteMergeArray });
             }
             else {
                 currentSchema = schema;
@@ -612,7 +612,7 @@ class TableConverter {
                 if (translationOptions.embedInRoot || translationOptions.embedInParsed.length === 1) {
                     if (!translationOptions.embedInRoot) {
                         newSchema.title = translationOptions.embedIn;
-                        parentSchema.properties[translationOptions.embedIn] = newSchema;
+                        parentSchema.properties[translationOptions.embedIn] = deepmerge(parentSchema.properties[translationOptions.embedIn] || {}, newSchema, { arrayMerge: this.overwriteMergeArray });
                     }
                     else {
                         Object.assign(parentSchema.properties, newSchema.properties);

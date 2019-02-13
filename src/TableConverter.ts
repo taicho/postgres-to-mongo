@@ -475,6 +475,24 @@ export class TableConverter {
         }
     }
 
+    private overwriteMergeArray(destinationArray: any[], sourceArray: any[]) {
+        if (destinationArray.length
+            && sourceArray.length
+            && typeof destinationArray[0] === 'string'
+            && typeof sourceArray[0] === 'string') {
+            const keys: any = {};
+            for (const val of destinationArray) {
+                keys[val] = null;
+            }
+            for (const val of sourceArray) {
+                keys[val] = null;
+            }
+            return Object.keys(keys);
+        } else {
+            return sourceArray;
+        }
+    }
+
     private generateSchema(translationOptions: TableTranslationInternal, columns: { [index: string]: PostgresColumnInfo }) {
         this.processOptions(translationOptions, columns);
         this.log(`Generating Schema '${translationOptions.hasEmbed ? `${translationOptions.fromTable} -> ${translationOptions.toCollection}` : translationOptions.toCollection}'`);
@@ -561,24 +579,8 @@ export class TableConverter {
             schema.title = translationOptions.toCollection;
             let currentSchema = this.generatedSchemas[translationOptions.toCollection];
             if (currentSchema) {
-                function overwriteMerge(destinationArray: any[], sourceArray: any[]) {
-                    if (destinationArray.length
-                        && sourceArray.length
-                        && typeof destinationArray[0] === 'string'
-                        && typeof sourceArray[0] === 'string') {
-                        const keys: any = {};
-                        for (const val of destinationArray) {
-                            keys[val] = null;
-                        }
-                        for (const val of sourceArray) {
-                            keys[val] = null;
-                        }
-                        return Object.keys(keys);
-                    } else {
-                        return sourceArray;
-                    }
-                }
-                currentSchema = deepmerge(currentSchema, schema, { arrayMerge: overwriteMerge });
+
+                currentSchema = deepmerge(currentSchema, schema, { arrayMerge: this.overwriteMergeArray });
             } else {
                 currentSchema = schema;
             }
@@ -610,7 +612,7 @@ export class TableConverter {
                 if (translationOptions.embedInRoot || translationOptions.embedInParsed.length === 1) {
                     if (!translationOptions.embedInRoot) {
                         newSchema.title = translationOptions.embedIn;
-                        parentSchema.properties[translationOptions.embedIn] = newSchema;
+                        parentSchema.properties[translationOptions.embedIn] = deepmerge(parentSchema.properties[translationOptions.embedIn] || {}, newSchema, { arrayMerge: this.overwriteMergeArray });
                     } else {
                         Object.assign(parentSchema.properties, newSchema.properties);
                     }

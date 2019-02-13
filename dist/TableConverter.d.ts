@@ -33,6 +33,7 @@ export declare class TableConverter {
     private resolveJsonPath(str, obj);
     private processDeletes(options, documents);
     private getSchemaForType(metadata);
+    private overwriteMergeArray(destinationArray, sourceArray);
     private generateSchema(translationOptions, columns);
     private getJsonPropertyFromPathArray(arr, obj);
     private processJsonSchemaOptions(columnOptions, schemaType);
