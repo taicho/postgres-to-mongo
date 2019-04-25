@@ -1,6 +1,6 @@
 {
   "name": "postgres-to-mongo",
-  "version": "2.0.7",
+  "version": "2.1.0",
   "description": "A framework for converting Postgres Databases to Mongo.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

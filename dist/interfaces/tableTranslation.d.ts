@@ -40,4 +40,5 @@ export interface TableTranslation {
     customWhere?: string;
     onPersist?: (options: TableTranslation, documents: any[]) => Promise<void> | void;
     ignoreDeletesOnPersist?: boolean;
+    includeNulls?: boolean;
 }

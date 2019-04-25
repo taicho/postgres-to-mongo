@@ -10,4 +10,5 @@ export interface ConverterOptions {
     useMetadataCache?: boolean;
     createMetadataCache?: boolean;
     cacheDirectory?: string;
+    includeNulls?: boolean;
 }

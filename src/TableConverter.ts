@@ -853,6 +853,9 @@ export class TableConverter {
                     }
                     count += rows.length;
                     if (documents.length) {
+                        if (!this.options.includeNulls && !translationOptions.includeNulls) {
+                            this.purgeNulls(documents);
+                        }
                         if (translationOptions.onPersist) {
                             log('Executing OnPersist.');
                             if (!translationOptions.ignoreDeletesOnPersist) {
@@ -908,6 +911,17 @@ export class TableConverter {
                 });
             }
         });
+    }
+
+    private purgeNulls(documents: any[]) {
+        for (const document of documents) {
+            for (const key of Object.keys(document)) {
+                const value = document[key];
+                if (value === null) {
+                    delete document[key];
+                }
+            }
+        }
     }
 
     private getConverter(metadata: PostgresColumnInfo): ColumnConverter {

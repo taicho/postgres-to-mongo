@@ -860,6 +860,9 @@ class TableConverter {
                         }
                         count += rows.length;
                         if (documents.length) {
+                            if (!this.options.includeNulls && !translationOptions.includeNulls) {
+                                this.purgeNulls(documents);
+                            }
                             if (translationOptions.onPersist) {
                                 log('Executing OnPersist.');
                                 if (!translationOptions.ignoreDeletesOnPersist) {
@@ -919,6 +922,16 @@ class TableConverter {
                 }
             }));
         });
+    }
+    purgeNulls(documents) {
+        for (const document of documents) {
+            for (const key of Object.keys(document)) {
+                const value = document[key];
+                if (value === null) {
+                    delete document[key];
+                }
+            }
+        }
     }
     getConverter(metadata) {
         const typeName = metadata.data_type;

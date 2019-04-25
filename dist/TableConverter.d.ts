@@ -40,6 +40,7 @@ export declare class TableConverter {
     private processOptions(translationOptions, columns);
     private insertDocuments(translationOptions, documents);
     private processRecords(translationOptions, columns, cursor, totalCount?, count?);
+    private purgeNulls(documents);
     private getConverter(metadata);
     private queryPostgres<T>(queryString);
     private getCacheDirectory();
